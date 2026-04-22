@@ -1,0 +1,18 @@
+# Data files
+*.mat
+*.npz
+*.dat
+
+# Original MATLAB source
+*.m
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code local settings
+.claude/
