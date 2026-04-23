@@ -1,4 +1,4 @@
-# User Guide: `main_v2.py`
+# User Guide
 
 Compute magnetic Bloch bands or density of states for bilayer graphene on
 hBN at rational magnetic flux `qq/pp` per moire unit cell.
@@ -99,9 +99,9 @@ where `Nk = nk1 * nk2` and `Nbands = 2 * qq * (2*N + 1)`.
 ## Programmatic usage
 
 ```python
-from main_v2 import BLG_hBN_magnetic_bloch_bands_BZ
+from main_v2 import do_calc
 
-result = BLG_hBN_magnetic_bloch_bands_BZ('input_test.txt')
+result = do_calc('input_test.txt')
 
 if result['calctype'] == 'ek':
     kpoints = result['kpoints']

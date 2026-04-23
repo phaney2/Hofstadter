@@ -1,4 +1,4 @@
-# Technical Documentation: `main_v2.py`
+# Technical Documentation
 
 Magnetic Bloch band solver for bilayer graphene (BLG) on hexagonal boron
 nitride (hBN) in a perpendicular magnetic field.  The magnetic flux per
@@ -46,24 +46,43 @@ magnetic Bloch band energies.
 
 ## 2. Module structure
 
-All code lives in `main_v2.py`.  Functions are organized in four layers:
+Code is split across six modules:
 
-### Layer 1: Utilities
+| Module | Purpose |
+|---|---|
+| `constants.py` | Physical constants (HBAR, Q_E, A_GRAPHENE, A_HBN) |
+| `parser.py` | MATLAB-style input file parser |
+| `numerics.py` | Mathematical routines: Laguerre polynomials, F_nm matrix elements |
+| `basis.py` | Label-based basis toolkit: outer product and index lookup |
+| `hamiltonian.py` | All Hamiltonian construction (intralayer, intermonolayer, interbilayer) |
+| `main_v2.py` | Engine (`do_calc`), k-point solver, CLI entry point |
+
+### `parser.py`
 
 | Function | Purpose |
 |---|---|
 | `parse_input_file(filepath)` | Read MATLAB-style input file into a dict. Evaluates expressions in a shared namespace so later lines can reference earlier variables (e.g., `elist` referencing `nebin`). |
 | `_eval_matlab_value(s, ns)` | Evaluate a single value expression. Handles strings, cell arrays `{...}`, numeric arrays `[...]`, and `linspace`. |
-| `lf_function(m, n, alpha, x)` | Generalized Laguerre polynomials via three-term recurrence. Returns shape `(m, n+1)`. |
-| `fnm5(n, m, q, lB, laguerretable)` | LL matrix element `F_{nm}(q)` -- the form factor `<n|exp(iq.r)|m>` in the LL basis.  Uses Stirling-like approximations for large n,m to avoid factorial overflow. Requires `n >= m`. |
-| `outer_product(mtx1, labels1, mtx2, labels2)` | Kronecker-style block outer product with label tracking.  `result[i,j] = mtx1[i1,j1] * mtx2`.  Labels are concatenated as `"{lab1}_{lab2}_"`. |
-| `getindices(labelset, labels)` | Find indices in a label list whose entries contain ALL given substrings.  Used to select basis states by sublattice/LL/guiding-center. |
 
-### Layer 2: Hamiltonian construction
+### `numerics.py`
 
 | Function | Purpose |
 |---|---|
-| `_build_fnm_tables(N, ktheta, lB, q_vectors)` | Precompute the Laguerre table and all `F_{nm}` tables for a list of momentum-transfer vectors. Returns `([Fnm_q1, Fnm_q2, Fnm_q3], LLlabels)`. |
+| `lf_function(m, n, alpha, x)` | Generalized Laguerre polynomials via three-term recurrence. Returns shape `(m, n+1)`. |
+| `fnm5(n, m, q, lB, laguerretable)` | LL matrix element `F_{nm}(q)` -- the form factor `<n|exp(iq.r)|m>` in the LL basis.  Uses Stirling-like approximations for large n,m to avoid factorial overflow. Requires `n >= m`. |
+| `build_fnm_tables(N, ktheta, lB, q_vectors)` | Precompute the Laguerre table and all `F_{nm}` tables for a list of momentum-transfer vectors. Returns `([Fnm_q1, Fnm_q2, Fnm_q3], LLlabels)`. |
+
+### `basis.py`
+
+| Function | Purpose |
+|---|---|
+| `outer_product(mtx1, labels1, mtx2, labels2)` | Kronecker-style block outer product with label tracking.  `result[i,j] = mtx1[i1,j1] * mtx2`.  Labels are concatenated as `"{lab1}_{lab2}_"`. |
+| `getindices(labelset, labels)` | Find indices in a label list whose entries contain ALL given substrings.  Used to select basis states by sublattice/LL/guiding-center. |
+
+### `hamiltonian.py`
+
+| Function | Purpose |
+|---|---|
 | `_build_chain_matrices_K(Nq, pp, qq)` | Build guiding-center chain hopping matrices for K valley. Returns `(chain1, chain2, chain3, chainlabels)`. |
 | `_build_chain_matrices_Kp(Nq, pp, qq)` | Same for K' valley (phase signs are negated). |
 | `_assemble_interbilayer_terms(...)` | Combine chain matrices, F_nm tables, and sublattice hopping matrices via two nested `outer_product` calls.  Chops the spurious LL_N row/column. Returns `(term1, term2, term3, qNslabels)`. |
@@ -74,20 +93,15 @@ All code lives in `main_v2.py`.  Functions are organized in four layers:
 | `get_intralayerH_K(N, theta, B, labels, params, delta_site)` | Intralayer kinetic Hamiltonian for K valley.  Builds upper-triangular part, then symmetrizes via `H + H^dagger`.  Includes sublattice mass `delta`. |
 | `get_intralayerH_Kp(N, theta, B, labels, params, delta_site)` | Same for K' valley. |
 
-### Layer 3: k-point solver
+### `main_v2.py`
 
 | Function | Purpose |
 |---|---|
 | `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths. |
 | `_init_kpoint_worker(shared)` | Pool initializer: stores shared matrices in module-global `_worker_shared` so they are pickled once per worker, not per task. |
 | `_solve_kpoint(args)` | Pool worker entry point.  Unpacks `(kc, kpt)`, calls `_solve_kpoint_core`, returns `(kc, tek_K, tek_Kp)`. |
-
-### Layer 4: Top-level orchestration
-
-| Function | Purpose |
-|---|---|
-| `BLG_hBN_magnetic_bloch_bands_BZ(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians, runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
-| `main(input_file)` | CLI wrapper: calls `BLG_hBN_magnetic_bloch_bands_BZ`, saves result to `.npz`. |
+| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians, runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
+| `main(input_file)` | CLI wrapper: calls `do_calc`, saves result to `.npz`. |
 
 ---
 
@@ -265,8 +279,14 @@ psi        = -0.29       rad  (hBN moire coupling phase)
 
 | File | Role |
 |---|---|
-| `main_v2.py` | All computation code |
-| `input_test.txt` | Example input file |
+| `main_v2.py` | Engine: `do_calc`, k-point solver, CLI entry point |
+| `hamiltonian.py` | Hamiltonian construction (intralayer, intermonolayer, interbilayer) |
+| `numerics.py` | Laguerre polynomials, F_nm matrix elements, table builder |
+| `basis.py` | `outer_product`, `getindices` |
+| `parser.py` | MATLAB-style input file parser |
+| `constants.py` | Physical constants |
+| `input_test.txt` | Example input file (pp=1, qq=1) |
+| `input_p3_q1.txt` | Example input file (pp=3, qq=1) |
 | `validate.py` | Compares Python output against MATLAB `.mat` benchmarks |
 | `bands_p{pp}_q{qq}.mat` | MATLAB benchmark data |
 
