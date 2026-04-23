@@ -10,7 +10,8 @@ format. The essential workflow is:
 
 1. Write an input file (or modify `input_test.txt`).
 2. Run: `python main_v2.py input_file.txt`
-3. Load results: `np.load('bands_p{pp}_q{qq}.npz')`
+3. Load results from the `outputfile` path (defaults to `bands_p{pp}_q{qq}.npz`).
+   Use `.mat` extension for MATLAB format, `.npz` for NumPy.
 
 Or call directly from Python:
 
@@ -47,6 +48,8 @@ def write_input(filepath, pp, qq, calctype='dos', **overrides):
 
 ## Output format quick reference
 
+All input parameters are stored in the output file.
+
 ### calctype = 'ek'
 - `kpoints`: (Nk, 2) array, k-coordinates in 1/m
 - `bands_K`, `bands_Kp`: (Nk, Nbands) arrays, eigenvalues in meV
@@ -54,6 +57,10 @@ def write_input(filepath, pp, qq, calctype='dos', **overrides):
 ### calctype = 'dos'
 - `elist`: (nebin,) array, energy grid in meV
 - `dos_K`, `dos_Kp`: (nebin,) arrays, state counts per energy bin
+
+### File formats
+- `.npz`: params stored with `input_` prefix (e.g., `input_pp`, `input_g0`)
+- `.mat`: params stored in a `params` struct (e.g., `params.pp`, `params.g0`)
 
 ## Magnetic field
 

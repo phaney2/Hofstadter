@@ -275,7 +275,8 @@ def do_calc(filepath):
     print(" Done with the k loop")
 
     if calctype == 'ek':
-        return {'calctype': 'ek', 'kpoints': kpoints,
+        return {'calctype': 'ek', 'params': inp,
+                'kpoints': kpoints,
                 'bands_K': bands_K, 'bands_Kp': bands_Kp}
 
     # --- DOS: bin eigenvalues into energy histogram ---
@@ -295,7 +296,8 @@ def do_calc(filepath):
             for b in bins:
                 dos_Kp[b] += 1
 
-    return {'calctype': 'dos', 'elist': elist,
+    return {'calctype': 'dos', 'params': inp,
+            'elist': elist,
             'dos_K': dos_K, 'dos_Kp': dos_Kp}
 
 
@@ -303,19 +305,36 @@ def do_calc(filepath):
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _save_result(result, outfile):
+    """Save result dict to .npz or .mat depending on file extension."""
+    data = {k: v for k, v in result.items() if k not in ('calctype', 'params')}
+    params = result.get('params', {})
+
+    if outfile.endswith('.mat'):
+        from scipy.io import savemat
+        data['params'] = params
+        savemat(outfile, data)
+    else:
+        for k, v in params.items():
+            data[f"input_{k}"] = np.asarray(v)
+        np.savez(outfile, **data)
+
+    print(f" Saved to {outfile}")
+
+
 def main(input_file=None):
     if input_file is None:
         input_file = './input_test.txt'
 
-    inp = parse_input_file(input_file)
-    pp = int(inp['pp'])
-    qq = int(inp['qq'])
-
     result = do_calc(input_file)
+    params = result['params']
+    pp = int(params['pp'])
+    qq = int(params['qq'])
 
-    outfile = f"bands_p{pp}_q{qq}.npz"
-    np.savez(outfile, **{k: v for k, v in result.items() if k != 'calctype'})
-    print(f" Saved to {outfile}")
+    default_outfile = f"bands_p{pp}_q{qq}.npz"
+    outfile = params.get('outputfile', default_outfile)
+
+    _save_result(result, outfile)
     return result
 
 

@@ -15,7 +15,9 @@ python main_v2.py
 python main_v2.py my_params.txt
 ```
 
-Output is saved to `bands_p{pp}_q{qq}.npz`.
+Output is saved to the file specified by the `outputfile` input parameter.
+If `outputfile` is not set, defaults to `bands_p{pp}_q{qq}.npz`.  The file
+format (`.npz` or `.mat`) is detected from the extension.
 
 ---
 
@@ -68,15 +70,32 @@ variables (e.g., `elist` can use `nebin`).
 | `valley` | cell | `{'K', 'Kp'}` | Which valleys to compute |
 | `nebin` | int | `1000` | Number of energy bins (for dos mode) |
 | `elist` | array | `linspace(-300,300,nebin)` | Energy grid in meV (for dos mode) |
+| `outputfile` | string | `bands_p{pp}_q{qq}.npz` | Output filename; use `.mat` extension for MATLAB format |
 
 ---
 
 ## Output format
 
-Output is a `.npz` file (load with `np.load`).  Contents depend on
-`calctype`:
+Two output formats are supported, selected by the `outputfile` extension:
 
-### `calctype = 'ek'`
+- **`.npz`** (NumPy): load with `np.load('file.npz')`
+- **`.mat`** (MATLAB): load with `scipy.io.loadmat` or MATLAB's `load`
+
+All input parameters are stored in the output file alongside the results.
+
+### `.npz` format
+
+Results are top-level keys.  Input parameters are stored with an `input_`
+prefix (e.g., `input_pp`, `input_g0`).
+
+### `.mat` format
+
+Results are top-level variables.  Input parameters are stored in a
+`params` struct (e.g., `params.pp`, `params.g0`).
+
+### Result keys by calctype
+
+#### `calctype = 'ek'`
 
 | Key | Shape | Units | Description |
 |---|---|---|---|
@@ -86,7 +105,7 @@ Output is a `.npz` file (load with `np.load`).  Contents depend on
 
 where `Nk = nk1 * nk2` and `Nbands = 2 * qq * (2*N + 1)`.
 
-### `calctype = 'dos'`
+#### `calctype = 'dos'`
 
 | Key | Shape | Units | Description |
 |---|---|---|---|
@@ -102,6 +121,10 @@ where `Nk = nk1 * nk2` and `Nbands = 2 * qq * (2*N + 1)`.
 from main_v2 import do_calc
 
 result = do_calc('input_test.txt')
+
+# Input parameters are always available
+params = result['params']        # dict of all input file parameters
+print(params['pp'], params['qq'])
 
 if result['calctype'] == 'ek':
     kpoints = result['kpoints']

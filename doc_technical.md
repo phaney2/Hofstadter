@@ -212,7 +212,8 @@ Worker count defaults to `min(cpu_count(), Nk_tot)`.
 
 ## 8. Output modes
 
-Controlled by the `calctype` input parameter:
+Controlled by the `calctype` input parameter.  All output dicts include
+a `'params'` key containing the full input parameter dict.
 
 ### `calctype = 'ek'`
 
@@ -221,7 +222,8 @@ Returns the full band structure: eigenvalues at every k-point.
 ```python
 result = {
     'calctype': 'ek',
-    'kpoints':  ndarray (Nk_tot, 2),       # k-points in 1/m
+    'params':   dict,                       # all input file parameters
+    'kpoints':  ndarray (Nk_tot, 2),        # k-points in 1/m
     'bands_K':  ndarray (Nk_tot, 2*dim1),   # sorted eigenvalues in meV
     'bands_Kp': ndarray (Nk_tot, 2*dim1),
 }
@@ -234,13 +236,24 @@ Bins eigenvalues into an energy histogram (density of states).
 ```python
 result = {
     'calctype': 'dos',
-    'elist':  ndarray (nebin,),    # energy grid in meV
-    'dos_K':  ndarray (nebin,),    # state count per bin, K valley
-    'dos_Kp': ndarray (nebin,),    # state count per bin, K' valley
+    'params':  dict,                # all input file parameters
+    'elist':   ndarray (nebin,),    # energy grid in meV
+    'dos_K':   ndarray (nebin,),    # state count per bin, K valley
+    'dos_Kp':  ndarray (nebin,),    # state count per bin, K' valley
 }
 ```
 
 The legacy MATLAB value `calctype = 'spectrum'` is mapped to `'dos'`.
+
+### File output
+
+The `main` function saves results to disk.  Output format is determined
+by the `outputfile` input parameter extension:
+
+- **`.npz`**: input params stored with `input_` prefix (e.g., `input_pp`)
+- **`.mat`**: input params stored as a `params` struct (e.g., `params.pp`)
+
+If `outputfile` is not set, defaults to `bands_p{pp}_q{qq}.npz`.
 
 ---
 
