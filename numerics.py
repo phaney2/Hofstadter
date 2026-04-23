@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.special import gammaln, jv
 
 
 def lf_function(m, n, alpha, x):
@@ -88,19 +89,71 @@ def fnm5(n, m, q, lB, laguerretable):
 def build_fnm_tables(N, ktheta, lB, q_vectors):
     """Build Laguerre table and F_{nm} tables for a set of q-vectors."""
     zsq = (lB * ktheta) ** 2 / 2
+    alphas = np.arange(N + 1, dtype=float)
     laguerretable = np.zeros((N + 1, N + 1))
-    for m_idx in range(N + 1):
-        laguerretable[:, m_idx] = lf_function(1, N, m_idx, zsq).flatten()
+    laguerretable[0, :] = 1.0
+    if N >= 1:
+        laguerretable[1, :] = 1.0 + alphas - zsq
+    for k in range(2, N + 1):
+        laguerretable[k, :] = ((2 * k - 1 + alphas - zsq) * laguerretable[k - 1, :]
+                               + (-k + 1 - alphas) * laguerretable[k - 2, :]) / k
+
+    log_fact = gammaln(np.arange(N + 2, dtype=float) + 1)
+
+    n_arr, m_arr = np.tril_indices(N + 1)
+    diff = n_arr - m_arr
+    laguerre_vals = laguerretable[m_arr, diff]
+
+    bad_L = np.isinf(laguerre_vals) | np.isnan(laguerre_vals)
+    zero_L = (laguerre_vals == 0) & ~bad_L
+    good = ~bad_L & ~zero_L
 
     tables = []
     for q in q_vectors:
+        qx, qy = q
+        zmstar = (-qx * lB + 1j * qy * lB) / np.sqrt(2)
+        zsq_q = (qx * lB) ** 2 / 2 + (qy * lB) ** 2 / 2
+
         tbl = np.zeros((N + 1, N + 1), dtype=complex)
-        for n in range(N + 1):
-            for m in range(n + 1):
-                tbl[n, m] = fnm5(n, m, q, lB, laguerretable)
-                if m != n:
-                    sign = 1 if (n - m) % 2 == 0 else -1
-                    tbl[m, n] = sign * np.conj(tbl[n, m])
+        zmag = abs(zmstar)
+        if zmag == 0:
+            np.fill_diagonal(tbl, np.exp(-zsq_q / 2))
+            tables.append(tbl)
+            continue
+
+        log_zmag = np.log(zmag)
+        ang_zm = np.angle(zmstar)
+
+        log_mag_base = (0.5 * (log_fact[m_arr] - log_fact[n_arr])
+                        + diff * log_zmag
+                        - zsq_q / 2)
+
+        f_vals = np.zeros(len(n_arr), dtype=complex)
+
+        if np.any(good):
+            log_abs_L = np.log(np.abs(laguerre_vals[good]))
+            log_total = log_mag_base[good] + log_abs_L
+            phase = diff[good] * ang_zm
+            neg_mask = laguerre_vals[good] < 0
+            phase[neg_mask] += np.pi
+            f_vals[good] = np.exp(log_total + 1j * phase)
+
+        if np.any(bad_L):
+            bad_n = n_arr[bad_L].astype(float)
+            bad_m = m_arr[bad_L].astype(float)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                f_b = ((1 / np.e) ** ((bad_m - bad_n) / 2)
+                       * (bad_m / bad_n) ** (bad_n / 2)
+                       * jv(bad_n - bad_m, 2 * (bad_m * zsq_q) ** 0.5))
+            f_b = np.where(np.isfinite(f_b), f_b, 0.0)
+            f_vals[bad_L] = f_b
+
+        tbl[n_arr, m_arr] = f_vals
+
+        off_diag = diff > 0
+        signs = np.where(diff[off_diag] % 2 == 0, 1.0, -1.0)
+        tbl[m_arr[off_diag], n_arr[off_diag]] = signs * np.conj(f_vals[off_diag])
+
         tables.append(tbl)
 
     LLlabels = [f"LL{n}" for n in range(N + 1)]

@@ -28,7 +28,7 @@ def _solve_kpoint_core(d, kpt):
     kx_val, ky_val = kpts
     pp, qq = d['pp'], d['qq']
     Lx, Ly = d['Lx'], d['Ly']
-    gamma, v0, dim_MLG = d['gamma'], d['v0'], d['dim_MLG']
+    gamma, dim_MLG = d['gamma'], d['dim_MLG']
 
     tek_K = None
     tek_Kp = None
@@ -38,28 +38,22 @@ def _solve_kpoint_core(d, kpt):
         tphase2 = np.exp(-1j * (pp / qq) * kx_val * Lx / 2) * np.exp(1j * ky_val * Ly * (pp / qq))
         tphase3 = np.exp(-1j * (pp / qq) * kx_val * Lx / 2) * np.exp(-1j * ky_val * Ly * (pp / qq))
 
-        V_hBN_pq_K = gamma * tphase1 * d['term1_K'] + tphase2 * d['term2_K'] + tphase3 * d['term3_K']
-        V_hBN_tot_K = v0 * np.eye(dim_MLG) + V_hBN_pq_K + V_hBN_pq_K.T.conj()
+        V_pq = gamma * tphase1 * d['term1_K'] + tphase2 * d['term2_K'] + tphase3 * d['term3_K']
 
-        V_hBN_K = np.zeros((2 * dim_MLG, 2 * dim_MLG), dtype=complex)
-        V_hBN_K[dim_MLG:, dim_MLG:] = V_hBN_tot_K
-
-        Htotal_K = 1000 / Q_E * (d['H_BLG_K'] + V_hBN_K)
-        tek_K = np.sort(linalg.eigvalsh(Htotal_K))
+        Htotal_K = d['H_base_K'].copy()
+        Htotal_K[dim_MLG:, dim_MLG:] += d['v0_eye'] + V_pq + V_pq.T.conj()
+        tek_K = np.sort(linalg.eigvalsh(Htotal_K, overwrite_a=True, check_finite=False))
 
     if 'Kp' in d['valley']:
         tphase1 = np.exp(-1j * (pp / qq) * kx_val * Lx)
         tphase2 = np.exp(1j * (pp / qq) * kx_val * Lx / 2) * np.exp(-1j * ky_val * Ly * (pp / qq))
         tphase3 = np.exp(1j * (pp / qq) * kx_val * Lx / 2) * np.exp(1j * ky_val * Ly * (pp / qq))
 
-        V_hBN_pq_Kp = gamma * tphase1 * d['term1_Kp'] + tphase2 * d['term2_Kp'] + tphase3 * d['term3_Kp']
-        V_hBN_tot_Kp = v0 * np.eye(dim_MLG) + V_hBN_pq_Kp + V_hBN_pq_Kp.T.conj()
+        V_pq = gamma * tphase1 * d['term1_Kp'] + tphase2 * d['term2_Kp'] + tphase3 * d['term3_Kp']
 
-        V_hBN_Kp = np.zeros((2 * dim_MLG, 2 * dim_MLG), dtype=complex)
-        V_hBN_Kp[dim_MLG:, dim_MLG:] = V_hBN_tot_Kp
-
-        Htotal_Kp = 1000 / Q_E * (d['H_BLG_Kp'] + V_hBN_Kp)
-        tek_Kp = np.sort(linalg.eigvalsh(Htotal_Kp))
+        Htotal_Kp = d['H_base_Kp'].copy()
+        Htotal_Kp[dim_MLG:, dim_MLG:] += d['v0_eye'] + V_pq + V_pq.T.conj()
+        tek_Kp = np.sort(linalg.eigvalsh(Htotal_Kp, overwrite_a=True, check_finite=False))
 
     return tek_K, tek_Kp
 
@@ -233,21 +227,29 @@ def do_calc(filepath):
     bands_K = np.zeros((Nk_tot, 2 * dim_MLG))
     bands_Kp = np.zeros((Nk_tot, 2 * dim_MLG))
 
-    # --- pack shared data for the k-point solver ---
+    # --- pre-scale and pack shared data for the k-point solver ---
+    scale = 1000 / Q_E
+    v0_eye_scaled = scale * v0 * np.eye(dim_MLG)
+
     shared = {
         'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
-        'gamma': gamma, 'v0': v0, 'dim_MLG': dim_MLG,
+        'gamma': gamma, 'dim_MLG': dim_MLG,
         'valley': valley, 'M_mag': M_mag,
+        'v0_eye': v0_eye_scaled,
     }
     if 'K' in valley:
         shared.update({
-            'H_BLG_K': H_BLG_K, 'term1_K': term1_K,
-            'term2_K': term2_K, 'term3_K': term3_K,
+            'H_base_K': scale * H_BLG_K,
+            'term1_K': scale * term1_K,
+            'term2_K': scale * term2_K,
+            'term3_K': scale * term3_K,
         })
     if 'Kp' in valley:
         shared.update({
-            'H_BLG_Kp': H_BLG_Kp, 'term1_Kp': term1_Kp,
-            'term2_Kp': term2_Kp, 'term3_Kp': term3_Kp,
+            'H_base_Kp': scale * H_BLG_Kp,
+            'term1_Kp': scale * term1_Kp,
+            'term2_Kp': scale * term2_Kp,
+            'term3_Kp': scale * term3_Kp,
         })
 
     print(" Entering the k loop")

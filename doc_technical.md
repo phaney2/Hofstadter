@@ -69,8 +69,8 @@ Code is split across six modules:
 | Function | Purpose |
 |---|---|
 | `lf_function(m, n, alpha, x)` | Generalized Laguerre polynomials via three-term recurrence. Returns shape `(m, n+1)`. |
-| `fnm5(n, m, q, lB, laguerretable)` | LL matrix element `F_{nm}(q)` -- the form factor `<n|exp(iq.r)|m>` in the LL basis.  Uses Stirling-like approximations for large n,m to avoid factorial overflow. Requires `n >= m`. |
-| `build_fnm_tables(N, ktheta, lB, q_vectors)` | Precompute the Laguerre table and all `F_{nm}` tables for a list of momentum-transfer vectors. Returns `([Fnm_q1, Fnm_q2, Fnm_q3], LLlabels)`. |
+| `fnm5(n, m, q, lB, laguerretable)` | LL matrix element `F_{nm}(q)` -- the form factor `<n|exp(iq.r)|m>` in the LL basis.  Uses Stirling-like approximations for large n,m to avoid factorial overflow. Requires `n >= m`.  (Legacy scalar interface; no longer called by `build_fnm_tables`.) |
+| `build_fnm_tables(N, ktheta, lB, q_vectors)` | Precompute the Laguerre table and all `F_{nm}` tables for a list of momentum-transfer vectors. Returns `([Fnm_q1, Fnm_q2, Fnm_q3], LLlabels)`.  Uses vectorized log-space (`gammaln`) computation over all `(n,m)` pairs simultaneously, with a Bessel-function fallback for entries where the Laguerre recurrence overflows. |
 
 ### `basis.py`
 
@@ -97,11 +97,11 @@ Code is split across six modules:
 
 | Function | Purpose |
 |---|---|
-| `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths. |
+| `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths.  Operates on pre-scaled data (already multiplied by `1000/Q_E`) so no per-k-point unit conversion is needed.  Uses `eigvalsh(overwrite_a=True, check_finite=False)` to avoid internal copies. |
 | `_init_kpoint_worker(shared)` | Pool initializer: stores shared matrices in module-global `_worker_shared` so they are pickled once per worker, not per task. |
 | `_solve_kpoint(args)` | Pool worker entry point.  Unpacks `(kc, kpt)`, calls `_solve_kpoint_core`, returns `(kc, tek_K, tek_Kp)`. |
-| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians, runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
-| `main(input_file)` | CLI wrapper: calls `do_calc`, saves result to `.npz`. |
+| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians, pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
+| `main(input_file)` | CLI wrapper: calls `do_calc`, saves result to `.npz` or `.mat`. |
 
 ---
 
@@ -305,7 +305,41 @@ psi        = -0.29       rad  (hBN moire coupling phase)
 
 ---
 
-## 12. Known subtleties
+## 12. Performance characteristics
+
+The eigenvalue solver (`scipy.linalg.eigvalsh`, backed by LAPACK) dominates
+runtime for large matrices.  At the typical scale of pp=15, qq=1 (matrix
+size 1178x1178), ~97% of wall time is spent in LAPACK.
+
+### Optimizations in place
+
+- **Vectorized F_nm table construction**: `build_fnm_tables` computes all
+  matrix elements in a single vectorized pass using log-space arithmetic
+  (`gammaln`) instead of ~N^2/2 scalar Python calls.  The Laguerre
+  recurrence is also vectorized over all alpha values simultaneously.
+  These two changes reduced Hamiltonian construction from ~1.3s to ~0.01s
+  for N=294.
+
+- **Pre-scaled k-loop**: The k-independent Hamiltonian (`H_BLG`) and moire
+  coupling terms are pre-multiplied by `1000/Q_E` before the k-loop.
+  This eliminates redundant per-k-point scaling and temporary array
+  allocations.  The k-point solver operates entirely in meV.
+
+- **Eigenvalue solver flags**: `overwrite_a=True` avoids an internal matrix
+  copy in LAPACK; `check_finite=False` skips the NaN/inf scan.
+
+### Scaling bottleneck
+
+The LAPACK eigensolve is O(n^3) and cannot be reduced by computing a
+subset of eigenvalues -- `subset_by_index` still performs the full
+tridiagonal reduction and provides no speedup at the matrix sizes used
+here (tested up to 1178x1178).  For production runs with many k-points,
+set `isparallel = 1` to distribute the k-loop across CPU cores; this
+provides near-linear speedup since each k-point is independent.
+
+---
+
+## 13. Known subtleties
 
 - **Fortran-order flattening**: The k-mesh grid is flattened with `order='F'`
   to match MATLAB's column-major `reshape`.  Changing this breaks benchmark
@@ -319,5 +353,6 @@ psi        = -0.29       rad  (hBN moire coupling phase)
   `eig`.  The Hamiltonian is Hermitian by construction.
 
 - **Unit conversion**: All tight-binding parameters enter in meV but are
-  converted to Joules for Hamiltonian construction.  The final eigenvalues
-  are converted back to meV via `1000/Q_E`.
+  converted to Joules for Hamiltonian construction.  The k-independent
+  Hamiltonian and moire terms are pre-scaled to meV before the k-loop;
+  the k-point solver works entirely in meV.
