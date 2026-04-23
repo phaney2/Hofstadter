@@ -1,7 +1,25 @@
 """Compare Python output against MATLAB .mat benchmarks."""
+import tempfile
 import numpy as np
 from scipy.io import loadmat
-from main_v2 import BLG_hBN_magnetic_bloch_bands_BZ
+from main_v2 import do_calc
+
+
+def _force_ek_input(input_file):
+    """Copy input file with calctype forced to 'ek'."""
+    with open(input_file, 'r') as f:
+        lines = f.readlines()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('calctype'):
+            new_lines.append("calctype = 'ek';\n")
+        else:
+            new_lines.append(line)
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+    tmp.writelines(new_lines)
+    tmp.close()
+    return tmp.name
 
 
 def compare(input_file, mat_file, label):
@@ -10,7 +28,8 @@ def compare(input_file, mat_file, label):
     print(f"  input: {input_file}  |  reference: {mat_file}")
     print(f"{'='*60}")
 
-    result = BLG_hBN_magnetic_bloch_bands_BZ(input_file)
+    ek_input = _force_ek_input(input_file)
+    result = do_calc(ek_input)
     kpoints_py = result['kpoints']
     bands_K_py = result['bands_K']
     bands_Kp_py = result['bands_Kp']

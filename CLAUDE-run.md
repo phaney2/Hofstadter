@@ -15,8 +15,8 @@ format. The essential workflow is:
 Or call directly from Python:
 
 ```python
-from main_v2 import BLG_hBN_magnetic_bloch_bands_BZ
-result = BLG_hBN_magnetic_bloch_bands_BZ('input_file.txt')
+from main_v2 import do_calc
+result = do_calc('input_file.txt')
 ```
 
 ## Generating input files programmatically
