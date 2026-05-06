@@ -217,7 +217,7 @@ def do_calc(filepath):
     n11 = n1grid.flatten(order='F')
     n22 = n2grid.flatten(order='F')
 
-    vb = np.array([b1 / pp, b2 / pp])
+    vb = np.array([b1 / pp, b2 / pp * qq])
     kpoints = np.zeros((Nk_tot, 2))
     for j in range(Nk_tot):
         frac = np.array([n11[j] / nk1, n22[j] / nk2])
@@ -282,6 +282,7 @@ def do_calc(filepath):
                 'bands_K': bands_K, 'bands_Kp': bands_Kp}
 
     # --- DOS: bin eigenvalues into energy histogram ---
+    dos_weight = 1.0 / Nk_tot
     dos_K = np.zeros(len(elist))
     dos_Kp = np.zeros(len(elist))
     for kc in range(Nk_tot):
@@ -290,13 +291,13 @@ def do_calc(filepath):
             in_range = tek[(tek > elist[0]) & (tek < elist[-1])]
             bins = np.argmin(np.abs(in_range[:, None] - elist[None, :]), axis=1)
             for b in bins:
-                dos_K[b] += 1
+                dos_K[b] += dos_weight
         if 'Kp' in valley:
             tek = bands_Kp[kc, :]
             in_range = tek[(tek > elist[0]) & (tek < elist[-1])]
             bins = np.argmin(np.abs(in_range[:, None] - elist[None, :]), axis=1)
             for b in bins:
-                dos_Kp[b] += 1
+                dos_Kp[b] += dos_weight
 
     return {'calctype': 'dos', 'params': inp,
             'elist': elist,
