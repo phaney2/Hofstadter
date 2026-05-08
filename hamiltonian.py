@@ -86,9 +86,9 @@ def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
 
     psi_angle = -0.29
     w = np.exp(1j * 2 * np.pi / 3)
-    t1 = v1 * np.exp(1j * psi_angle) * np.array([[1, w**(-1)], [1, w**(-1)]])
-    t2 = v1 * np.exp(1j * psi_angle) * np.array([[1, w], [w, w**(-1)]])
-    t3 = v1 * np.exp(1j * psi_angle) * np.array([[1, 1], [w**(-1), w**(-1)]])
+    t1 = v1 * np.exp(-1j * psi_angle) * np.array([[1, w**(-1)], [w**(-1), w]])
+    t2 = v1 * np.exp(-1j * psi_angle) * np.array([[1, w], [1, w]])
+    t3 = v1 * np.exp(-1j * psi_angle) * np.array([[1, 1], [w, w]])
 
     fnm_tables, LLlabels = build_fnm_tables(N, ktheta, lB, [q1, q2, q3])
     chain1, chain2, chain3, chainlabels = _build_chain_matrices_K(Nq, pp, qq)
@@ -100,15 +100,15 @@ def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
 
 def get_interbilayerterms_Kp(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
     """Compute inter-bilayer coupling terms for K' valley."""
-    q1 = -ktheta * np.array([0, -1])
-    q2 = -ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
-    q3 = -ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
+    q1 = ktheta * np.array([0, -1])
+    q2 = ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
+    q3 = ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
 
     psi_angle = -0.29
     w = np.exp(1j * 2 * np.pi / 3)
-    t1 = v1 * np.exp(-1j * psi_angle) * np.array([[1, w], [1, w]])
-    t2 = v1 * np.exp(-1j * psi_angle) * np.array([[1, w**(-1)], [w**(-1), w]])
-    t3 = v1 * np.exp(-1j * psi_angle) * np.array([[1, 1], [w, w]])
+    t1 = v1 * np.exp(1j * psi_angle) * np.array([[1, w], [w, w**(-1)]])
+    t2 = v1 * np.exp(1j * psi_angle) * np.array([[1, w**(-1)], [1, w**(-1)]])
+    t3 = v1 * np.exp(1j * psi_angle) * np.array([[1, 1], [w**(-1), w**(-1)]])
 
     fnm_tables, LLlabels = build_fnm_tables(N, ktheta, lB, [q1, q2, q3])
     chain1, chain2, chain3, chainlabels = _build_chain_matrices_Kp(Nq, pp, qq)

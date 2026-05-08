@@ -1,23 +1,41 @@
 # User Guide
 
-Compute magnetic Bloch bands or density of states for mono- or bilayer
-graphene on hBN at rational magnetic flux `qq/pp` per moire unit cell.
+Moire band structure solvers for mono- or bilayer graphene on hBN.
+
+Two calculation modes:
+
+- **Hofstadter** (`main_v2.py`): Magnetic Bloch bands at rational flux
+  qq/pp, using a Landau-level basis.
+- **Zero-field** (`zerofield.py`): Moire band structure along a k-path
+  through the moire BZ, using a plane-wave expansion.
 
 ---
 
 ## Quick start
 
-```bash
-# Run with default input file
-python main_v2.py
+### Hofstadter (magnetic field)
 
-# Run with custom input file
-python main_v2.py my_params.txt
+```bash
+python main_v2.py                   # default input_test.txt
+python main_v2.py my_params.txt     # custom input
 ```
 
-Output is saved to the file specified by the `outputfile` input parameter.
-If `outputfile` is not set, defaults to `bands_p{pp}_q{qq}.npz`.  The file
-format (`.npz` or `.mat`) is detected from the extension.
+Output defaults to `bands_p{pp}_q{qq}.npz`.
+
+### Zero-field (no magnetic field)
+
+```bash
+python zerofield.py                     # default input_zerofield.txt
+python zerofield.py my_params.txt       # custom input
+```
+
+Output defaults to `bands_zerofield.npz`.  Plot in MATLAB:
+
+```matlab
+plot_zerofield    % loads bands_zerofield.mat
+```
+
+Output file format (`.npz` or `.mat`) is detected from the extension.
 
 ---
 
@@ -32,7 +50,7 @@ variable = value;
 Lines starting with `%` are comments.  Later lines can reference earlier
 variables (e.g., `elist` can use `nebin`).
 
-### Complete parameter reference
+### Hofstadter parameter reference
 
 #### Required physical parameters
 
@@ -72,6 +90,31 @@ variables (e.g., `elist` can use `nebin`).
 | `nebin` | int | `1000` | Number of energy bins (for dos mode) |
 | `elist` | array | `linspace(-300,300,nebin)` | Energy grid in meV (for dos mode) |
 | `outputfile` | string | `bands_p{pp}_q{qq}.npz` | Output filename; use `.mat` extension for MATLAB format |
+
+### Zero-field parameter reference
+
+#### Physical parameters
+
+| Parameter | Type | Example | Description |
+|---|---|---|---|
+| `g0` | float (meV) | `2472` | Graphene intralayer hopping (determines hbar*vF) |
+| `g1` | float (meV) | `340` | BLG interlayer coupling (gamma1). Not used for `nlayers=1`. |
+| `g3` | float (meV) | `0` | Trigonal warping (gamma3). Not used for `nlayers=1`. |
+| `v0` | float (meV) | `29.8` | hBN uniform moire potential |
+| `v1` | float (meV) | `21` | hBN modulated moire potential |
+| `vF` (or `hbar_vF`) | float (eV*A) | `5.2657` | Dirac velocity (optional; overrides g0-derived value) |
+
+#### Computation control
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `nlayers` | int | `2` | 1 = monolayer, 2 = bilayer |
+| `theta` | float (rad) | `0.0` | Twist angle |
+| `U` | array (meV) | `[0 0]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer |
+| `NQ` | int | `7` | Q-vector grid size per direction (total: NQ^2 plane waves) |
+| `dk` | float (1/A) | `5e-4` | k-point spacing along the path |
+| `valley` | cell | `{'K', 'Kp'}` | Which valleys to compute |
+| `outputfile` | string | `bands_zerofield.npz` | Output filename |
 
 ---
 
@@ -114,6 +157,23 @@ where `Nk = nk1 * nk2` and `Nbands = nlayers * qq * (2*N + 1)`.
 | `dos_K` | (nebin,) | counts | States per bin, K valley |
 | `dos_Kp` | (nebin,) | counts | States per bin, K' valley |
 
+### Zero-field output
+
+| Key | Shape | Units | Description |
+|---|---|---|---|
+| `band_K` | (NT, dim) | eV | Sorted eigenvalues along k-path, K valley |
+| `band_Kp` | (NT, dim) | eV | Sorted eigenvalues along k-path, K' valley |
+| `k_region_K` | (NT,) | -- | Linearized k-path parameter [0, 1], K valley |
+| `k_region_Kp` | (NT,) | -- | Linearized k-path parameter [0, 1], K' valley |
+| `tick_positions_K` | (4,) | -- | High-symmetry point positions on k_region |
+| `tick_labels_K` | (4,) | -- | Labels: K1, G, K2, K1 |
+| `tick_positions_Kp` | (4,) | -- | High-symmetry point positions on k_region |
+| `tick_labels_Kp` | (4,) | -- | Labels: K2, K1, G, K2 |
+| `dim` | int | -- | Hamiltonian dimension |
+
+where `NT` is the total number of k-points and `dim = 2*NQ^2` (monolayer)
+or `4*NQ^2` (bilayer).  Multiply eigenvalues by 1000 for meV.
+
 ---
 
 ## Programmatic usage
@@ -136,6 +196,20 @@ elif result['calctype'] == 'dos':
     elist = result['elist']           # energy grid, meV
     dos_K = result['dos_K']           # histogram counts
     dos_Kp = result['dos_Kp']
+```
+
+### Zero-field programmatic usage
+
+```python
+from zerofield import do_calc
+
+result = do_calc('input_zerofield.txt')
+
+band_K = result['band_K']           # shape (NT, dim), eV
+band_Kp = result['band_Kp']
+k_region = result['k_region_K']     # [0, 1] parameter
+ticks = result['tick_positions_K']  # high-symmetry points
+labels = result['tick_labels_K']    # ['K1', 'G', 'K2', 'K1']
 ```
 
 ---
@@ -213,6 +287,39 @@ calctype = 'dos';
 valley = {'K', 'Kp'};
 nebin = 1000;
 elist = linspace(-300, 300, nebin);
+```
+
+### Zero-field bilayer (matching MATLAB benchmark)
+
+```
+theta = 0.0174532925199433;
+nlayers = 2;
+g0 = 2472;
+hbar_vF = 5.2657;
+g1 = 340;
+g3 = 0;
+v0 = 29.8;
+v1 = 21;
+U = [0 0];
+NQ = 7;
+dk = 5e-4;
+valley = {'K', 'Kp'};
+outputfile = 'bands_zerofield.mat';
+```
+
+### Zero-field monolayer
+
+```
+theta = 0.0;
+nlayers = 1;
+g0 = 2134;
+v0 = 29.8;
+v1 = 21;
+U = [0 0];
+NQ = 7;
+dk = 5e-4;
+valley = {'K', 'Kp'};
+outputfile = 'bands_zerofield.mat';
 ```
 
 ---

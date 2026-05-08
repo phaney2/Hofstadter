@@ -1,11 +1,18 @@
 # Technical Documentation
 
-Magnetic Bloch band solver for mono- or bilayer graphene on hexagonal boron
-nitride (hBN) in a perpendicular magnetic field.  The magnetic flux per
-moire unit cell is the rational number `qq/pp`.
+Moire band structure solvers for mono- or bilayer graphene on hexagonal
+boron nitride (hBN).  Two calculation modes:
+
+1. **Hofstadter** (`main_v2.py`): Magnetic Bloch bands in a Landau-level
+   basis at rational magnetic flux `qq/pp` per moire unit cell.
+2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
+   expansion (no magnetic field), computed along a k-path through the
+   moire Brillouin zone.
 
 Reference: P. M. Haney, "A Quantum Ruler for Orbital Magnetism in Moire
 Quantum Matter."
+
+# Part I: Hofstadter (magnetic field)
 
 ---
 
@@ -65,7 +72,7 @@ energies.
 
 ---
 
-## 2. Module structure
+## 2. Module structure (Hofstadter)
 
 Code is split across six modules:
 
@@ -315,16 +322,21 @@ psi        = -0.29       rad  (hBN moire coupling phase)
 
 | File | Role |
 |---|---|
-| `main_v2.py` | Engine: `do_calc`, k-point solver, CLI entry point |
+| `main_v2.py` | Hofstadter engine: `do_calc`, k-point solver, CLI entry point |
 | `hamiltonian.py` | Hamiltonian construction (intralayer, intermonolayer, interbilayer) |
 | `numerics.py` | Laguerre polynomials, F_nm matrix elements, table builder |
 | `basis.py` | `outer_product`, `getindices` |
-| `parser.py` | MATLAB-style input file parser |
-| `constants.py` | Physical constants |
-| `input_test.txt` | Example input file (pp=1, qq=1) |
-| `input_p3_q1.txt` | Example input file (pp=3, qq=1) |
-| `validate.py` | Compares Python output against MATLAB `.mat` benchmarks |
-| `bands_p{pp}_q{qq}.mat` | MATLAB benchmark data |
+| `parser.py` | MATLAB-style input file parser (shared) |
+| `constants.py` | Physical constants (shared) |
+| `zerofield.py` | Zero-field engine: moire geometry, plane-wave Hamiltonian, k-path solver |
+| `input_test.txt` | Example Hofstadter input (pp=1, qq=1) |
+| `input_p3_q1.txt` | Example Hofstadter input (pp=3, qq=1) |
+| `input_zerofield.txt` | Example zero-field input |
+| `validate.py` | Hofstadter benchmark comparison |
+| `validate_zerofield.py` | Zero-field benchmark comparison |
+| `plot_zerofield.m` | MATLAB plotting script for zero-field bands |
+| `bands_p{pp}_q{qq}.mat` | Hofstadter MATLAB benchmark data |
+| `matlab_code/zerofield/` | Original MATLAB zero-field code and benchmark (`bands_BG.mat`) |
 
 ---
 
@@ -379,3 +391,199 @@ provides near-linear speedup since each k-point is independent.
   converted to Joules for Hamiltonian construction.  The k-independent
   Hamiltonian and moire terms are pre-scaled to meV before the k-loop;
   the k-point solver works entirely in meV.
+
+---
+---
+
+# Part II: Zero-field (no magnetic field)
+
+## 14. Physical setup
+
+The same graphene/hBN system as the Hofstadter calculation, but with no
+magnetic field.  The Hamiltonian is expressed in a plane-wave basis: each
+state is labeled by (sublattice, Q-vector), where Q runs over moire
+reciprocal lattice vectors.
+
+The basis set is a grid of `NQ x NQ` moire reciprocal lattice vectors
+`Q = p*q1 + r*q2` with `p, r in {-NQ//2, ..., NQ//2}`, sorted by norm.
+The number of retained plane waves is `NG = NQ^2`.
+
+### Bilayer (`nlayers = 2`)
+
+```
+H = [ H_top(k)      U_BLG(k)^dag ]
+    [ U_BLG(k)       H_bot(k) + H_hopp ]
+```
+
+- `H_top/H_bot`: block-diagonal Dirac Hamiltonians, one 2x2 block per
+  Q-vector: `-hbar_vF * (k - Q) . sigma + U_{top/bot} * I`
+- `U_BLG`: interlayer coupling (gamma1 dimer + v3 trigonal warping)
+- `H_hopp`: k-independent hBN moire potential (acts on bottom layer only)
+- Dimension: `4 * NG`
+
+### Monolayer (`nlayers = 1`)
+
+```
+H = H_intra(k) + H_hopp + U * I
+```
+
+Single Dirac cone plus moire potential.  Dimension: `2 * NG`.
+
+### Eigenvalues
+
+The eigenvalues of H (in eV) give the moire band energies at each k-point.
+
+---
+
+## 15. Module structure (zero-field)
+
+The zero-field solver is self-contained in `zerofield.py`, reusing only
+`parser.py` and `constants.py` from the Hofstadter code.
+
+| Function | Purpose |
+|---|---|
+| `_compute_moire_vectors(theta, a, a_hBN)` | Compute moire reciprocal lattice vectors q1, q2, q3 from lattice constants and twist angle.  Uses 3D cross-product formulation matching the MATLAB code. |
+| `_build_qvectors(NQ, q1, q2)` | Build integer-centered Q-vector grid `Q = p*q1 + r*q2`, sort by norm.  Returns Q array, integer indices, and NG. |
+| `_build_coupling_matrices_K(V0, V1)` | hBN moire coupling T-matrices for K valley: T0 (uniform), T1/T2/T3 (modulated).  Phase convention uses `psi = -0.29`. |
+| `_build_coupling_matrices_Kp(V0, V1)` | Same for K' valley (conjugate phases, permuted sublattice factors). |
+| `_build_moire_hopping(Q_idx, NG, T0, T1, T2, T3, valley)` | Assemble the k-independent moire hopping matrix `H_hopp` (2*NG x 2*NG) using integer-index Kronecker deltas on Q-vector differences.  Valley-dependent sign convention on the q-vectors. |
+| `_solve_kpath_K(...)` | Build and diagonalize the full Hamiltonian at each k-point for K valley.  Handles both monolayer and bilayer. |
+| `_solve_kpath_Kp(...)` | Same for K' valley (sign flip on sigma_x in the Dirac term and interlayer coupling). |
+| `_make_kpath(q1, q2, dk, valley)` | Build high-symmetry k-path through the moire BZ.  K valley: K1->Gamma->K2->K1.  K' valley: K2->K1->Gamma->K2.  Returns k-points, linearized parameter, tick positions, and tick labels. |
+| `do_calc(filepath)` | Main entry point: read input, compute geometry, build coupling matrices, solve along k-path for each valley. |
+| `main(input_file)` | CLI wrapper: calls `do_calc`, saves to `.npz` or `.mat`. |
+
+---
+
+## 16. Moire geometry
+
+Moire real-space lattice vectors are computed from the lattice mismatch
+and twist angle:
+
+```
+M = (I - (a/a_hBN) * R^(-1))^(-1) * a_graphene
+```
+
+where `R` is the rotation matrix for twist angle `theta`.  Reciprocal
+vectors are obtained via 3D cross products (z-component discarded):
+
+```
+q1 = 2*pi * (M2 x M3) / vol     (xy components)
+q2 = 2*pi * (M3 x M1) / vol
+q3 = -q1 - q2
+```
+
+The Q-vector grid uses integer offsets: `Q = p*q1 + r*q2` with
+`p, r in {-NQ//2, ..., NQ//2}`.  This is equivalent to the MATLAB code's
+half-integer grid with Dq offset, since `Dq = -(q1+q2)/2` exactly cancels
+the half-integer shift.
+
+---
+
+## 17. Moire coupling (hBN potential)
+
+The hBN moire potential couples plane-wave states whose Q-vectors differ
+by q1, q2, or q3.  For each pair (Q_j, Q_k):
+
+**K valley**:
+
+| Q_j - Q_k | Contribution |
+|---|---|
+| 0 | T0 (uniform on-site) |
+| +q1 | T1^dag |
+| -q1 | T1 |
+| +q2 | T2^dag |
+| -q2 | T2 |
+| +q3 | T3^dag |
+| -q3 | T3 |
+
+**K' valley**: the q-vector signs are negated (replace +q with -q).
+
+The coupling matrices are:
+
+```
+w = exp(i * 2*pi/3)
+
+K valley:
+  T0 = V0 * I
+  T1 = V1 * exp(i*psi) * [1, w^-1; 1, w^-1]
+  T2 = V1 * exp(i*psi) * [1, w; w, w^-1]
+  T3 = V1 * exp(i*psi) * [1, 1; w^-1, w^-1]
+
+K' valley:
+  T0 = V0 * I
+  T1 = V1 * exp(-i*psi) * [1, w; 1, w]
+  T2 = V1 * exp(-i*psi) * [1, w^-1; w^-1, w]
+  T3 = V1 * exp(-i*psi) * [1, 1; w, w]
+```
+
+Using integer indices for Q-vectors, the Kronecker deltas become exact
+integer comparisons (no floating-point tolerance needed).
+
+---
+
+## 18. Intralayer and interlayer Hamiltonians
+
+**Intralayer (Dirac)**: block-diagonal, one 2x2 block per Q-vector:
+
+```
+K valley:   h_j = -hbar_vF * [(kx - Qx)*sigma_x + (ky - Qy)*sigma_y]
+K' valley:  h_j = -hbar_vF * [-(kx - Qx)*sigma_x + (ky - Qy)*sigma_y]
+```
+
+**Interlayer (bilayer only)**: block-diagonal, one 2x2 block per Q-vector:
+
+```
+K valley:   U_j = gamma1 * [0,1;0,0] - hbar_v3 * [(kx-Qx) - i(ky-Qy)] * [0,0;1,0]
+K' valley:  U_j = gamma1 * [0,1;0,0] - hbar_v3 * [-(kx-Qx) - i(ky-Qy)] * [0,0;1,0]
+```
+
+Parameters:
+- `hbar_vF = sqrt(3)/2 * g0 * a` (eV*A), overridable via `hbar_vF` input
+- `gamma1 = g1/1000` (eV)
+- `hbar_v3 = sqrt(3)/2 * g3 * a` (eV*A)
+
+---
+
+## 19. k-path
+
+The k-path traces high-symmetry lines through the moire BZ:
+
+```
+K1 = (1/3)*q1 + (2/3)*q2
+K2 = (2/3)*q1 + (1/3)*q2
+G  = (0, 0)
+
+K valley:   K1 -> G -> K2 -> K1
+K' valley:  K2 -> K1 -> G -> K2
+```
+
+Each segment has `round(|segment_length| / dk)` k-points.  The linearized
+`k_region` parameter runs from 0 to 1 over all segments (matching MATLAB's
+`linspace(0, 1, NT)` convention).  Segment boundaries produce duplicate
+k-points (intentional, matching MATLAB).
+
+---
+
+## 20. Unit conventions (zero-field)
+
+| Stage | Units |
+|---|---|
+| Input parameters (g0, g1, v0, v1, U) | meV |
+| Internal Hamiltonian | eV (and Angstroms for momentum) |
+| Output eigenvalues | eV |
+
+The conversion: `hbar_vF (eV*A) = sqrt(3)/2 * g0(meV)/1000 * a(A)`.
+Plot in meV by multiplying eigenvalues by 1000.
+
+---
+
+## 21. Files (zero-field)
+
+| File | Role |
+|---|---|
+| `zerofield.py` | Zero-field engine: geometry, Hamiltonian, k-path solver |
+| `input_zerofield.txt` | Default input file |
+| `validate_zerofield.py` | Benchmark comparison against MATLAB `bands_BG.mat` |
+| `plot_zerofield.m` | MATLAB plotting script |
+| `matlab_code/zerofield/` | Original MATLAB code and benchmark data |

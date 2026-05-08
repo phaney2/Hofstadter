@@ -1,0 +1,12 @@
+theta = 0.0;
+nlayers = 1;
+g0 = 2134;
+g1 = 0;
+g3 = 0;
+v0 = 29.8;
+v1 = 21;
+U = [0 0];
+NQ = 7;
+dk = 5e-4;
+valley = {'K', 'Kp'};
+outputfile = 'bands_zerofield.mat';
