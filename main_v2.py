@@ -28,7 +28,8 @@ def _solve_kpoint_core(d, kpt):
     kx_val, ky_val = kpts
     pp, qq = d['pp'], d['qq']
     Lx, Ly = d['Lx'], d['Ly']
-    gamma, dim_MLG = d['gamma'], d['dim_MLG']
+    gamma = d['gamma']
+    mo = d['moire_offset']
 
     tek_K = None
     tek_Kp = None
@@ -41,7 +42,7 @@ def _solve_kpoint_core(d, kpt):
         V_pq = gamma * tphase1 * d['term1_K'] + tphase2 * d['term2_K'] + tphase3 * d['term3_K']
 
         Htotal_K = d['H_base_K'].copy()
-        Htotal_K[dim_MLG:, dim_MLG:] += d['v0_eye'] + V_pq + V_pq.T.conj()
+        Htotal_K[mo:, mo:] += d['v0_eye'] + V_pq + V_pq.T.conj()
         tek_K = np.sort(linalg.eigvalsh(Htotal_K, overwrite_a=True, check_finite=False))
 
     if 'Kp' in d['valley']:
@@ -52,7 +53,7 @@ def _solve_kpoint_core(d, kpt):
         V_pq = gamma * tphase1 * d['term1_Kp'] + tphase2 * d['term2_Kp'] + tphase3 * d['term3_Kp']
 
         Htotal_Kp = d['H_base_Kp'].copy()
-        Htotal_Kp[dim_MLG:, dim_MLG:] += d['v0_eye'] + V_pq + V_pq.T.conj()
+        Htotal_Kp[mo:, mo:] += d['v0_eye'] + V_pq + V_pq.T.conj()
         tek_Kp = np.sort(linalg.eigvalsh(Htotal_Kp, overwrite_a=True, check_finite=False))
 
     return tek_K, tek_Kp
@@ -100,10 +101,16 @@ def do_calc(filepath):
     qq = int(locals_dict['qq'])
     pp = int(locals_dict['pp'])
     g0 = locals_dict['g0']
-    g1 = locals_dict['g1']
-    g3 = locals_dict['g3']
-    g4 = locals_dict['g4']
-    delta = locals_dict.get('delta', 0)
+    nlayers = int(locals_dict.get('nlayers', 2))
+    if nlayers == 2:
+        g1 = locals_dict['g1']
+        g3 = locals_dict['g3']
+        g4 = locals_dict['g4']
+    else:
+        g1 = locals_dict.get('g1', 0)
+        g3 = locals_dict.get('g3', 0)
+        g4 = locals_dict.get('g4', 0)
+    delta = 0 if nlayers == 1 else locals_dict.get('delta', 0)
     v0_meV = locals_dict['v0']
     v1_meV = locals_dict['v1']
     w_meV = locals_dict['w']
@@ -159,12 +166,16 @@ def do_calc(filepath):
     Nq = qq
     dim1 = qq * N + qq * (N + 1)
 
-    Utp = np.eye(dim1) * U[0] / 1e3 * Q_E
-    Ubm = np.eye(dim1) * U[1] / 1e3 * Q_E
+    if nlayers == 1:
+        U_onsite = np.eye(dim1) * U[0] / 1e3 * Q_E
+    else:
+        Utp = np.eye(dim1) * U[0] / 1e3 * Q_E
+        Ubm = np.eye(dim1) * U[1] / 1e3 * Q_E
 
     Lx = L_moire
     Ly = np.sqrt(3) * L_moire / 2
 
+    print(f"  nlayers = {nlayers}")
     print(f"  N (Landau levels) = {N}")
     print(f"  dim per layer = {dim1}")
     print(f"  B = {B:.6e} T")
@@ -174,14 +185,17 @@ def do_calc(filepath):
         print("  Building K-valley Hamiltonian...")
         term1_K, term2_K, term3_K, qNslabels_K = get_interbilayerterms_K(
             N, Nq, ktheta, lB, v0, v1, eta, qq, pp)
-        Hinter_K = get_intermonolayerH_K(N, 0, B, qNslabels_K, TBGparams)
-        Hintra1_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'A')
-        Hintra2_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'B')
+        Hintra_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'A')
 
-        H_BLG_K = np.block([
-            [Hintra1_K + Utp, Hinter_K],
-            [Hinter_K.T.conj(), Hintra2_K + Ubm]
-        ])
+        if nlayers == 1:
+            H_base_K = Hintra_K + U_onsite
+        else:
+            Hinter_K = get_intermonolayerH_K(N, 0, B, qNslabels_K, TBGparams)
+            Hintra2_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'B')
+            H_base_K = np.block([
+                [Hintra_K + Utp, Hinter_K],
+                [Hinter_K.T.conj(), Hintra2_K + Ubm]
+            ])
 
         chop_K = getindices(qNslabels_K, ['B', f"LL{N}_"])
         qNslabels_K_trimmed = [s for i, s in enumerate(qNslabels_K) if i not in chop_K]
@@ -191,14 +205,17 @@ def do_calc(filepath):
         print("  Building K'-valley Hamiltonian...")
         term1_Kp, term2_Kp, term3_Kp, qNslabels_Kp = get_interbilayerterms_Kp(
             N, Nq, ktheta, lB, v0, v1, eta, qq, pp)
-        Hinter_Kp = get_intermonolayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams)
-        Hintra1_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'A')
-        Hintra2_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'B')
+        Hintra_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'A')
 
-        H_BLG_Kp = np.block([
-            [Hintra1_Kp + Utp, Hinter_Kp],
-            [Hinter_Kp.T.conj(), Hintra2_Kp + Ubm]
-        ])
+        if nlayers == 1:
+            H_base_Kp = Hintra_Kp + U_onsite
+        else:
+            Hinter_Kp = get_intermonolayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams)
+            Hintra2_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'B')
+            H_base_Kp = np.block([
+                [Hintra_Kp + Utp, Hinter_Kp],
+                [Hinter_Kp.T.conj(), Hintra2_Kp + Ubm]
+            ])
 
         chop_Kp = getindices(qNslabels_Kp, ['A', f"LL{N}_"])
         qNslabels_Kp_trimmed = [s for i, s in enumerate(qNslabels_Kp) if i not in chop_Kp]
@@ -223,9 +240,10 @@ def do_calc(filepath):
         frac = np.array([n11[j] / nk1, n22[j] / nk2])
         kpoints[j, :] = vb.T @ frac
 
-    dim_MLG = Hintra1_K.shape[0] if 'K' in valley else Hintra1_Kp.shape[0]
-    bands_K = np.zeros((Nk_tot, 2 * dim_MLG))
-    bands_Kp = np.zeros((Nk_tot, 2 * dim_MLG))
+    dim_MLG = Hintra_K.shape[0] if 'K' in valley else Hintra_Kp.shape[0]
+    dim_total = dim_MLG if nlayers == 1 else 2 * dim_MLG
+    bands_K = np.zeros((Nk_tot, dim_total))
+    bands_Kp = np.zeros((Nk_tot, dim_total))
 
     # --- pre-scale and pack shared data for the k-point solver ---
     scale = 1000 / Q_E
@@ -233,20 +251,21 @@ def do_calc(filepath):
 
     shared = {
         'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
-        'gamma': gamma, 'dim_MLG': dim_MLG,
+        'gamma': gamma,
+        'moire_offset': 0 if nlayers == 1 else dim_MLG,
         'valley': valley, 'M_mag': M_mag,
         'v0_eye': v0_eye_scaled,
     }
     if 'K' in valley:
         shared.update({
-            'H_base_K': scale * H_BLG_K,
+            'H_base_K': scale * H_base_K,
             'term1_K': scale * term1_K,
             'term2_K': scale * term2_K,
             'term3_K': scale * term3_K,
         })
     if 'Kp' in valley:
         shared.update({
-            'H_base_Kp': scale * H_BLG_Kp,
+            'H_base_Kp': scale * H_base_Kp,
             'term1_Kp': scale * term1_Kp,
             'term2_Kp': scale * term2_Kp,
             'term3_Kp': scale * term3_Kp,

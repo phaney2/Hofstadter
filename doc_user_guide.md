@@ -1,7 +1,7 @@
 # User Guide
 
-Compute magnetic Bloch bands or density of states for bilayer graphene on
-hBN at rational magnetic flux `qq/pp` per moire unit cell.
+Compute magnetic Bloch bands or density of states for mono- or bilayer
+graphene on hBN at rational magnetic flux `qq/pp` per moire unit cell.
 
 ---
 
@@ -41,21 +41,22 @@ variables (e.g., `elist` can use `nebin`).
 | `pp` | int | `3` | Denominator of flux fraction qq/pp |
 | `qq` | int | `1` | Numerator of flux fraction qq/pp |
 | `g0` | float (meV) | `2796` | Graphene intralayer hopping |
-| `g1` | float (meV) | `340` | BLG interlayer coupling (gamma1) |
-| `g3` | float (meV) | `0` | Trigonal warping (gamma3) |
-| `g4` | float (meV) | `0` | Electron-hole asymmetry (gamma4) |
-| `delta` | float (meV) | `0` | Sublattice mass |
+| `g1` | float (meV) | `340` | BLG interlayer coupling (gamma1). Not required for `nlayers=1`. |
+| `g3` | float (meV) | `0` | Trigonal warping (gamma3). Not required for `nlayers=1`. |
+| `g4` | float (meV) | `0` | Electron-hole asymmetry (gamma4). Not required for `nlayers=1`. |
+| `delta` | float (meV) | `0` | Sublattice mass (bilayer only; ignored for `nlayers=1`) |
 | `v0` | float (meV) | `30` | hBN uniform moire potential |
 | `v1` | float (meV) | `21` | hBN modulated moire potential |
-| `w` | float (meV) | `110` | Interlayer coupling scale |
+| `w` | float (meV) | `110` | Interlayer coupling scale (used for LL cutoff estimate) |
 
 #### Computation control
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
+| `nlayers` | int | `2` | Number of graphene layers: 1 = monolayer, 2 = bilayer |
 | `theta` | float (rad) | `0.0` | Twist angle |
 | `eta` | float | `2` | AA/AB ratio (legacy) |
-| `U` | array (meV) | `0*[1 1]` | Layer on-site energies [top, bottom] |
+| `U` | array (meV) | `0*[1 1]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer |
 | `nk1` | int | `10` | k-mesh points along b1 |
 | `nk2` | int | `10` | k-mesh points along b2 |
 | `LL_multiplier` | int | `6` | Controls Landau level cutoff N |
@@ -103,7 +104,7 @@ Results are top-level variables.  Input parameters are stored in a
 | `bands_K` | (Nk, Nbands) | meV | Sorted eigenvalues, K valley |
 | `bands_Kp` | (Nk, Nbands) | meV | Sorted eigenvalues, K' valley |
 
-where `Nk = nk1 * nk2` and `Nbands = 2 * qq * (2*N + 1)`.
+where `Nk = nk1 * nk2` and `Nbands = nlayers * qq * (2*N + 1)`.
 
 #### `calctype = 'dos'`
 
@@ -166,6 +167,27 @@ calctype = 'ek';
 valley = {'K', 'Kp'};
 ```
 
+### Monolayer graphene on hBN at flux 1/1
+
+```
+nlayers = 1;
+isparallel = 1;
+theta = 0.0;
+qq = 1;
+pp = 1;
+g0 = 2796;
+v0 = 30;
+v1 = 21;
+w = 110;
+eta = 2;
+nk1 = 10;
+nk2 = 10;
+LL_multiplier = 6;
+Nmax = 1000;
+calctype = 'ek';
+valley = {'K', 'Kp'};
+```
+
 ### DOS at flux 1/5
 
 ```
@@ -217,7 +239,7 @@ cell area.  Larger `pp` means smaller B.
 
 - **`Nmax`**: Hard cap on N. For large pp (weak field), N grows and this
   cap prevents excessive matrix sizes. Matrix dimension scales as
-  `2 * qq * (2*N + 1)`.
+  `nlayers * qq * (2*N + 1)`.
 
 - **`nk1`, `nk2`**: k-mesh density. For DOS calculations, 10x10 is a
   starting point; increase for smoother histograms.

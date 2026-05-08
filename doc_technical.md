@@ -1,6 +1,6 @@
 # Technical Documentation
 
-Magnetic Bloch band solver for bilayer graphene (BLG) on hexagonal boron
+Magnetic Bloch band solver for mono- or bilayer graphene on hexagonal boron
 nitride (hBN) in a perpendicular magnetic field.  The magnetic flux per
 moire unit cell is the rational number `qq/pp`.
 
@@ -11,11 +11,14 @@ Quantum Matter."
 
 ## 1. Physical setup
 
-The system is a Bernal-stacked bilayer graphene sheet on an hBN substrate.
-The lattice mismatch between graphene (a = 2.46 A) and hBN (a = 2.504 A)
-produces a moire superlattice with period `L_moire`.  A perpendicular
-magnetic field B is applied such that the flux through one moire unit cell
-is the rational fraction `Phi/Phi_0 = qq/pp`.
+The system is a graphene sheet (monolayer or Bernal-stacked bilayer) on an
+hBN substrate.  The lattice mismatch between graphene (a = 2.46 A) and hBN
+(a = 2.504 A) produces a moire superlattice with period `L_moire`.  A
+perpendicular magnetic field B is applied such that the flux through one
+moire unit cell is the rational fraction `Phi/Phi_0 = qq/pp`.
+
+The number of graphene layers is controlled by the input parameter `nlayers`
+(default 2).
 
 The Hamiltonian is expressed in a Landau-level (LL) basis.  Each basis state
 is labeled by:
@@ -24,6 +27,8 @@ is labeled by:
 - **Guiding-center index** (`q0`, `q1`, ..., `q{qq-1}`) -- there are `qq`
   guiding centers per magnetic unit cell
 - **Landau-level index** (`LL0`, `LL1`, ..., `LL{N}`)
+
+### Bilayer (`nlayers = 2`)
 
 The total Hamiltonian for each valley is a 2x2 block matrix (two graphene
 layers):
@@ -39,8 +44,24 @@ V_hBN = [ 0           0          ]
 ```
 
 where `V_hBN_tot` is the moire potential from the hBN substrate acting on
-the bottom layer only.  The eigenvalues of `H_total` (in meV) give the
-magnetic Bloch band energies.
+the bottom layer only.
+
+### Monolayer (`nlayers = 1`)
+
+The Hamiltonian is a single block:
+
+```
+H_total = Hintra + U + V_hBN_tot
+```
+
+The intralayer kinetic term and the hBN moire potential act on the same
+(only) graphene layer.  Inter-monolayer coupling parameters (`g1`, `g3`,
+`g4`) are not used.  The sublattice mass `delta` is forced to zero.
+
+### Eigenvalues
+
+The eigenvalues of `H_total` (in meV) give the magnetic Bloch band
+energies.
 
 ---
 
@@ -100,7 +121,7 @@ Code is split across six modules:
 | `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths.  Operates on pre-scaled data (already multiplied by `1000/Q_E`) so no per-k-point unit conversion is needed.  Uses `eigvalsh(overwrite_a=True, check_finite=False)` to avoid internal copies. |
 | `_init_kpoint_worker(shared)` | Pool initializer: stores shared matrices in module-global `_worker_shared` so they are pickled once per worker, not per task. |
 | `_solve_kpoint(args)` | Pool worker entry point.  Unpacks `(kc, kpt)`, calls `_solve_kpoint_core`, returns `(kc, tek_K, tek_Kp)`. |
-| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians, pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
+| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer or bilayer depending on `nlayers`), pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
 | `main(input_file)` | CLI wrapper: calls `do_calc`, saves result to `.npz` or `.mat`. |
 
 ---
@@ -142,7 +163,7 @@ For a given `(pp, qq, N)`:
 - Guiding centers per magnetic unit cell: `Nq = qq`
 - Basis states per layer before chopping: `2 * qq * (N+1)` (two sublattices)
 - After chopping LL_N from one sublattice: `qq*N + qq*(N+1) = qq*(2N+1)`
-- Total Hamiltonian dimension: `2 * qq*(2N+1)` (two layers)
+- Total Hamiltonian dimension: `nlayers * qq*(2N+1)`
 
 N is determined automatically:
 `N = LL_multiplier * round(max(hbar*vF*ktheta, w) / eneLL)^2`, capped at
@@ -188,8 +209,9 @@ V_hBN_tot = v0 * I + V_pq + V_pq^dagger
 V_pq = gamma * tphase1 * term1 + tphase2 * term2 + tphase3 * term3
 ```
 
-This is placed in the bottom-right block of the 2-layer Hamiltonian (hBN
-substrate acts on the bottom layer only).
+For bilayer, this is placed in the bottom-right block of the 2-layer
+Hamiltonian (hBN substrate acts on the bottom layer only).  For monolayer,
+it is added directly to the single-layer Hamiltonian.
 
 ---
 
@@ -262,14 +284,15 @@ If `outputfile` is not set, defaults to `bands_p{pp}_q{qq}.npz`.
 | Parameter | Units (input) | Internal conversion | Role |
 |---|---|---|---|
 | `g0` | meV | `g0/1e3 * Q_E` → J | Intralayer nearest-neighbor hopping |
-| `g1` | meV | same | Interlayer A-B coupling (gamma1) |
-| `g3` | meV | same | Interlayer trigonal warping (gamma3) |
-| `g4` | meV | same | Interlayer electron-hole asymmetry (gamma4) |
-| `delta` | meV | same | Sublattice mass term |
+| `g1` | meV | same | Interlayer A-B coupling (gamma1). Bilayer only. |
+| `g3` | meV | same | Interlayer trigonal warping (gamma3). Bilayer only. |
+| `g4` | meV | same | Interlayer electron-hole asymmetry (gamma4). Bilayer only. |
+| `delta` | meV | same | Sublattice mass term. Bilayer only (forced to 0 for monolayer). |
 | `v0` | meV | same | hBN moire potential: on-site (uniform) |
 | `v1` | meV | same | hBN moire potential: spatially modulated |
 | `w` | meV | same | Interlayer coupling scale (used for LL cutoff estimate) |
-| `U` | meV | same | Layer-dependent on-site energies `[U_top, U_bottom]` |
+| `nlayers` | int | -- | Number of graphene layers: 1 (monolayer) or 2 (bilayer, default) |
+| `U` | meV | same | Layer on-site energies: scalar for monolayer, `[U_top, U_bottom]` for bilayer |
 | `theta` | radians | -- | Twist angle (0 for aligned BLG/hBN) |
 | `eta` | dimensionless | -- | AA/AB hopping ratio (legacy; not active for hBN) |
 
