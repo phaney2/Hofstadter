@@ -1,7 +1,9 @@
 """
-Magnetic Bloch bands for bilayer graphene on hBN substrate.
+Magnetic Bloch bands for mono/bilayer graphene on hBN substrate.
 
-Translated from MATLAB code by Paul M. Haney.
+Uses doubled guiding-center chain (Nq = 2*qq) and corrected moire
+coupling matrices (order=[3,1,2], conj=1, psiconj=1).
+
 Reference: "A Quantum Ruler for Orbital Magnetism in Moire Quantum Matter"
 """
 
@@ -81,7 +83,7 @@ def _solve_kpoint(args):
 
 def do_calc(filepath):
     """
-    Compute magnetic Bloch bands for bilayer graphene on hBN.
+    Compute magnetic Bloch bands for mono/bilayer graphene on hBN.
 
     Returns a dict with keys depending on calctype:
       'ek':  kpoints, bands_K, bands_Kp
@@ -94,42 +96,43 @@ def do_calc(filepath):
     Nmax = 5000
     calctype = 'ek'
     valley = ['K', 'Kp']
-    readFnmtable = 0
 
     # --- read input ---
     inp = parse_input_file(filepath)
-    locals_dict = dict(inp)
+    d = dict(inp)
 
-    theta = locals_dict.get('theta', 0.0)
-    qq = int(locals_dict['qq'])
-    pp = int(locals_dict['pp'])
-    g0 = locals_dict['g0']
-    nlayers = int(locals_dict.get('nlayers', 2))
+    theta = d.get('theta', 0.0)
+    qq = int(d['qq'])
+    pp = int(d['pp'])
+    g0 = d['g0']
+    nlayers = int(d.get('nlayers', 2))
     if nlayers == 2:
-        g1 = locals_dict['g1']
-        g3 = locals_dict['g3']
-        g4 = locals_dict['g4']
+        g1 = d['g1']
+        g3 = d['g3']
+        g4 = d['g4']
     else:
-        g1 = locals_dict.get('g1', 0)
-        g3 = locals_dict.get('g3', 0)
-        g4 = locals_dict.get('g4', 0)
-    delta = 0 if nlayers == 1 else locals_dict.get('delta', 0)
-    v0_meV = locals_dict['v0']
-    v1_meV = locals_dict['v1']
-    w_meV = locals_dict['w']
-    eta = locals_dict.get('eta', eta)
-    U = np.atleast_1d(locals_dict.get('U', np.array([0, 0])))
-    nk1 = int(locals_dict.get('nk1', 25))
-    nk2 = int(locals_dict.get('nk2', 40))
-    LL_multiplier = locals_dict.get('LL_multiplier', 6)
-    Nmax = int(locals_dict.get('Nmax', Nmax))
-    calctype = locals_dict.get('calctype', calctype)
-    valley = locals_dict.get('valley', valley)
-    nebin = int(locals_dict.get('nebin', 1000))
-    gamma = locals_dict.get('gamma', gamma)
-    vF = locals_dict.get('vF', vF)
-    isparallel = int(locals_dict.get('isparallel', 0))
-    elist = np.asarray(locals_dict.get('elist', np.linspace(-300, 300, nebin)))
+        g1 = d.get('g1', 0)
+        g3 = d.get('g3', 0)
+        g4 = d.get('g4', 0)
+    delta = 0 if nlayers == 1 else d.get('delta', 0)
+    v0_meV = d['v0']
+    v1_meV = d['v1']
+    w_meV = d['w']
+    eta = d.get('eta', eta)
+    U = np.atleast_1d(d.get('U', np.array([0, 0])))
+    if len(U) == 1:
+        U = np.array([U[0], 0])
+    nk1 = int(d.get('nk1', 25))
+    nk2 = int(d.get('nk2', 40))
+    LL_multiplier = d.get('LL_multiplier', 6)
+    Nmax = int(d.get('Nmax', Nmax))
+    calctype = d.get('calctype', calctype)
+    valley = d.get('valley', valley)
+    nebin = int(d.get('nebin', 1000))
+    gamma = d.get('gamma', gamma)
+    vF = d.get('vF', vF)
+    isparallel = int(d.get('isparallel', 0))
+    elist = np.asarray(d.get('elist', np.linspace(-300, 300, nebin)))
 
     if calctype == 'spectrum':
         calctype = 'dos'
@@ -138,7 +141,6 @@ def do_calc(filepath):
     eps = A_HBN / A_GRAPHENE - 1
     L_moire = (1 + eps) * A_GRAPHENE / np.sqrt(eps ** 2 + 2 * (1 + eps) * (1 - np.cos(theta)))
 
-    kd = 4 * np.pi / (3 * A_GRAPHENE)
     ktheta = 4 * np.pi / (3 ** 0.5 * L_moire)
     uc_area = 3 ** 0.5 * L_moire ** 2 / 2
 
@@ -152,8 +154,6 @@ def do_calc(filepath):
     v0 = v0_meV / 1e3 * Q_E
     v1 = v1_meV / 1e3 * Q_E
 
-    Delta_param = 3 ** 0.5 / 2 * ktheta * lB ** 2
-
     N = int(LL_multiplier * round(max(HBAR * vF * ktheta, w_J) / eneLL) ** 2)
     if N > Nmax:
         N = Nmax
@@ -166,21 +166,14 @@ def do_calc(filepath):
         'delta': delta / 1e3 * Q_E,
     }
 
-    Nq = qq
-    dim1 = qq * N + qq * (N + 1)
-
-    if nlayers == 1:
-        U_onsite = np.eye(dim1) * U[0] / 1e3 * Q_E
-    else:
-        Utp = np.eye(dim1) * U[0] / 1e3 * Q_E
-        Ubm = np.eye(dim1) * U[1] / 1e3 * Q_E
+    Nq = 2 * qq
 
     Lx = L_moire
     Ly = np.sqrt(3) * L_moire / 2
 
     print(f"  nlayers = {nlayers}")
     print(f"  N (Landau levels) = {N}")
-    print(f"  dim per layer = {dim1}")
+    print(f"  Nq (chain size) = {Nq}")
     print(f"  B = {B:.6e} T")
 
     # --- K valley: k-independent Hamiltonian ---
@@ -190,18 +183,21 @@ def do_calc(filepath):
             N, Nq, ktheta, lB, v0, v1, eta, qq, pp)
         Hintra_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'A')
 
+        dl = Hintra_K.shape[0]
         if nlayers == 1:
-            H_base_K = Hintra_K + U_onsite
+            U_onsite_val = U[0] / 1e3 * Q_E
+            H_base_K = Hintra_K + np.eye(dl) * U_onsite_val
         else:
+            Utp_val = U[0] / 1e3 * Q_E
+            Ubm_val = U[1] / 1e3 * Q_E
             Hinter_K = get_intermonolayerH_K(N, 0, B, qNslabels_K, TBGparams)
             Hintra2_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'B')
+            Utp = np.eye(dl) * Utp_val
+            Ubm = np.eye(dl) * Ubm_val
             H_base_K = np.block([
                 [Hintra_K + Utp, Hinter_K],
                 [Hinter_K.T.conj(), Hintra2_K + Ubm]
             ])
-
-        chop_K = getindices(qNslabels_K, ['B', f"LL{N}_"])
-        qNslabels_K_trimmed = [s for i, s in enumerate(qNslabels_K) if i not in chop_K]
 
     # --- K' valley: k-independent Hamiltonian ---
     if 'Kp' in valley:
@@ -210,25 +206,27 @@ def do_calc(filepath):
             N, Nq, ktheta, lB, v0, v1, eta, qq, pp)
         Hintra_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'A')
 
+        dl = Hintra_Kp.shape[0]
         if nlayers == 1:
-            H_base_Kp = Hintra_Kp + U_onsite
+            U_onsite_val = U[0] / 1e3 * Q_E
+            H_base_Kp = Hintra_Kp + np.eye(dl) * U_onsite_val
         else:
+            Utp_val = U[0] / 1e3 * Q_E
+            Ubm_val = U[1] / 1e3 * Q_E
             Hinter_Kp = get_intermonolayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams)
             Hintra2_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'B')
+            Utp = np.eye(dl) * Utp_val
+            Ubm = np.eye(dl) * Ubm_val
             H_base_Kp = np.block([
                 [Hintra_Kp + Utp, Hinter_Kp],
                 [Hinter_Kp.T.conj(), Hintra2_Kp + Ubm]
             ])
 
-        chop_Kp = getindices(qNslabels_Kp, ['A', f"LL{N}_"])
-        qNslabels_Kp_trimmed = [s for i, s in enumerate(qNslabels_Kp) if i not in chop_Kp]
-
     # --- k-mesh ---
     b1 = ktheta * np.array([0, -1])
     b2 = ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
 
-    M_pt = 0.5 * b1
-    M_mag = M_pt / pp
+    M_mag = 0.5 * b1 / pp
 
     Nk_tot = nk1 * nk2
     n1_arr = np.arange(nk1)
@@ -237,7 +235,7 @@ def do_calc(filepath):
     n11 = n1grid.flatten(order='F')
     n22 = n2grid.flatten(order='F')
 
-    vb = np.array([b1 / pp, b2 / pp * qq])
+    vb = np.array([b1 / pp / 2, b2 / pp])
     kpoints = np.zeros((Nk_tot, 2))
     for j in range(Nk_tot):
         frac = np.array([n11[j] / nk1, n22[j] / nk2])
@@ -245,6 +243,9 @@ def do_calc(filepath):
 
     dim_MLG = Hintra_K.shape[0] if 'K' in valley else Hintra_Kp.shape[0]
     dim_total = dim_MLG if nlayers == 1 else 2 * dim_MLG
+    print(f"  dim per layer (post-chop) = {dim_MLG}")
+    print(f"  dim total = {dim_total}")
+
     bands_K = np.zeros((Nk_tot, dim_total))
     bands_Kp = np.zeros((Nk_tot, dim_total))
 

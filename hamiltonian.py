@@ -84,11 +84,11 @@ def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
     q2 = ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
     q3 = ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
 
-    psi_angle = -0.29
-    w = np.exp(1j * 2 * np.pi / 3)
-    t1 = v1 * np.exp(-1j * psi_angle) * np.array([[1, w**(-1)], [w**(-1), w]])
-    t2 = v1 * np.exp(-1j * psi_angle) * np.array([[1, w], [1, w]])
-    t3 = v1 * np.exp(-1j * psi_angle) * np.array([[1, 1], [w, w]])
+    w = np.exp(-1j * 2 * np.pi / 3)
+    phase = v1 * np.exp(1j * 0.29)
+    t1 = phase * np.array([[1, w], [w, w**(-1)]])
+    t2 = phase * np.array([[1, 1], [w**(-1), w**(-1)]])
+    t3 = phase * np.array([[1, w**(-1)], [1, w**(-1)]])
 
     fnm_tables, LLlabels = build_fnm_tables(N, ktheta, lB, [q1, q2, q3])
     chain1, chain2, chain3, chainlabels = _build_chain_matrices_K(Nq, pp, qq)
@@ -100,15 +100,15 @@ def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
 
 def get_interbilayerterms_Kp(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
     """Compute inter-bilayer coupling terms for K' valley."""
-    q1 = ktheta * np.array([0, -1])
-    q2 = ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
-    q3 = ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
+    q1 = -ktheta * np.array([0, -1])
+    q2 = -ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
+    q3 = -ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
 
-    psi_angle = -0.29
-    w = np.exp(1j * 2 * np.pi / 3)
-    t1 = v1 * np.exp(1j * psi_angle) * np.array([[1, w], [w, w**(-1)]])
-    t2 = v1 * np.exp(1j * psi_angle) * np.array([[1, w**(-1)], [1, w**(-1)]])
-    t3 = v1 * np.exp(1j * psi_angle) * np.array([[1, 1], [w**(-1), w**(-1)]])
+    w = np.exp(-1j * 2 * np.pi / 3)
+    phase = v1 * np.exp(1j * 0.29)
+    t1 = np.conj(phase * np.array([[1, w], [w, w**(-1)]]))
+    t2 = np.conj(phase * np.array([[1, 1], [w**(-1), w**(-1)]]))
+    t3 = np.conj(phase * np.array([[1, w**(-1)], [1, w**(-1)]]))
 
     fnm_tables, LLlabels = build_fnm_tables(N, ktheta, lB, [q1, q2, q3])
     chain1, chain2, chain3, chainlabels = _build_chain_matrices_Kp(Nq, pp, qq)
@@ -261,3 +261,91 @@ def get_intralayerH_Kp(N, theta, B, qNslabels, params, delta_site):
     chop_idx = getindices(qNslabels, ['A', f"LL{N}_"])
     Hintra = np.delete(np.delete(Hintra, chop_idx, axis=0), chop_idx, axis=1)
     return Hintra
+
+
+def get_interbilayerterms_K_testing(N, Nq, ktheta, lB, v0, v1, eta, qq, pp,
+                                     order, sxflag, dagger, conj_flag, psi_conj):
+    q1 = ktheta * np.array([0, -1])
+    q2 = ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
+    q3 = ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
+
+    sx = np.array([[0, 1], [1, 0]], dtype=complex) if sxflag else np.eye(2, dtype=complex)
+    psi = 0.29 if psi_conj else -0.29
+    w = np.exp(-1j * 2 * np.pi / 3) if conj_flag else np.exp(1j * 2 * np.pi / 3)
+
+    base1 = np.array([[1, w**(-1)], [1, w**(-1)]])
+    base2 = np.array([[1, w], [w, w**(-1)]])
+    base3 = np.array([[1, 1], [w**(-1), w**(-1)]])
+
+    phase = v1 * np.exp(1j * psi)
+    if dagger:
+        tt1 = phase * base1.conj().T
+        tt2 = phase * base2.conj().T
+        tt3 = phase * base3.conj().T
+    else:
+        tt1 = phase * base1
+        tt2 = phase * base2
+        tt3 = phase * base3
+
+    t = [None, None, None]
+    t[order[0] - 1] = tt1
+    t[order[1] - 1] = tt2
+    t[order[2] - 1] = tt3
+    t1, t2, t3 = t
+
+    t1 = sx @ t1 @ sx
+    t2 = sx @ t2 @ sx
+    t3 = sx @ t3 @ sx
+
+    fnm_tables, LLlabels = build_fnm_tables(N, ktheta, lB, [q1, q2, q3])
+    chain1, chain2, chain3, chainlabels = _build_chain_matrices_K(Nq, pp, qq)
+
+    return _assemble_interbilayer_terms(
+        N, Nq, (chain1, chain2, chain3), chainlabels,
+        fnm_tables, LLlabels, (t1, t2, t3), 'B')
+
+
+def get_interbilayerterms_Kp_testing(N, Nq, ktheta, lB, v0, v1, eta, qq, pp,
+                                      order, sxflag, dagger, conj_flag, psi_conj):
+    q1 = -ktheta * np.array([0, -1])
+    q2 = -ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
+    q3 = -ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
+
+    sx = np.array([[0, 1], [1, 0]], dtype=complex) if sxflag else np.eye(2, dtype=complex)
+    psi = 0.29 if psi_conj else -0.29
+    w = np.exp(-1j * 2 * np.pi / 3) if conj_flag else np.exp(1j * 2 * np.pi / 3)
+
+    base1 = np.array([[1, w**(-1)], [1, w**(-1)]])
+    base2 = np.array([[1, w], [w, w**(-1)]])
+    base3 = np.array([[1, 1], [w**(-1), w**(-1)]])
+
+    phase = v1 * np.exp(1j * psi)
+    if dagger:
+        tt1 = phase * base1.conj().T
+        tt2 = phase * base2.conj().T
+        tt3 = phase * base3.conj().T
+    else:
+        tt1 = phase * base1
+        tt2 = phase * base2
+        tt3 = phase * base3
+
+    t = [None, None, None]
+    t[order[0] - 1] = tt1
+    t[order[1] - 1] = tt2
+    t[order[2] - 1] = tt3
+    t1, t2, t3 = t
+
+    t1 = sx @ t1 @ sx
+    t2 = sx @ t2 @ sx
+    t3 = sx @ t3 @ sx
+
+    t1 = np.conj(t1)
+    t2 = np.conj(t2)
+    t3 = np.conj(t3)
+
+    fnm_tables, LLlabels = build_fnm_tables(N, ktheta, lB, [q1, q2, q3])
+    chain1, chain2, chain3, chainlabels = _build_chain_matrices_Kp(Nq, pp, qq)
+
+    return _assemble_interbilayer_terms(
+        N, Nq, (chain1, chain2, chain3), chainlabels,
+        fnm_tables, LLlabels, (t1, t2, t3), 'A')
