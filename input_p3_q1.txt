@@ -20,6 +20,6 @@ Fnmdir = './';
 Nmax = 1000;
 calctype = 'spectrum';
 valley = {'K', 'Kp'};
-nebin = 1000;
+nebin = 500;
 elist = linspace(-300,300, nebin);
 outputfile = 'data_mu_1.mat';

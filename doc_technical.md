@@ -3,8 +3,9 @@
 Moire band structure solvers for mono- or bilayer graphene on hexagonal
 boron nitride (hBN).  Two calculation modes:
 
-1. **Hofstadter** (`main_v2.py`): Magnetic Bloch bands in a Landau-level
+1. **Hofstadter** (`main_v3.py`): Magnetic Bloch bands in a Landau-level
    basis at rational magnetic flux `qq/pp` per moire unit cell.
+   (`main_v2.py` is the legacy driver without chain doubling.)
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
    expansion (no magnetic field), computed along a k-path through the
    moire Brillouin zone.
@@ -31,8 +32,8 @@ The Hamiltonian is expressed in a Landau-level (LL) basis.  Each basis state
 is labeled by:
 
 - **Sublattice** (`A` or `B`)
-- **Guiding-center index** (`q0`, `q1`, ..., `q{qq-1}`) -- there are `qq`
-  guiding centers per magnetic unit cell
+- **Guiding-center index** (`q0`, `q1`, ..., `q{2*qq-1}`) -- there are
+  `2*qq` guiding centers per magnetic unit cell (doubled chain)
 - **Landau-level index** (`LL0`, `LL1`, ..., `LL{N}`)
 
 ### Bilayer (`nlayers = 2`)
@@ -82,8 +83,10 @@ Code is split across six modules:
 | `parser.py` | MATLAB-style input file parser |
 | `numerics.py` | Mathematical routines: Laguerre polynomials, F_nm matrix elements |
 | `basis.py` | Label-based basis toolkit: outer product and index lookup |
-| `hamiltonian.py` | All Hamiltonian construction (intralayer, intermonolayer, interbilayer) |
-| `main_v2.py` | Engine (`do_calc`), k-point solver, CLI entry point |
+| `hamiltonian.py` | All Hamiltonian construction (intralayer, intermonolayer, interbilayer, testing variants) |
+| `main_v3.py` | Production engine with doubled chain and corrected moire coupling |
+| `main_v2.py` | Legacy engine (single chain, old moire coupling conventions) |
+| `hofstadter_testing.py` | Butterfly sweep engine with configurable T-matrix conventions |
 
 ### `parser.py`
 
@@ -114,22 +117,48 @@ Code is split across six modules:
 | `_build_chain_matrices_K(Nq, pp, qq)` | Build guiding-center chain hopping matrices for K valley. Returns `(chain1, chain2, chain3, chainlabels)`. |
 | `_build_chain_matrices_Kp(Nq, pp, qq)` | Same for K' valley (phase signs are negated). |
 | `_assemble_interbilayer_terms(...)` | Combine chain matrices, F_nm tables, and sublattice hopping matrices via two nested `outer_product` calls.  Chops the spurious LL_N row/column. Returns `(term1, term2, term3, qNslabels)`. |
-| `get_interbilayerterms_K(...)` | Top-level: defines q-vectors and sublattice hopping matrices `t1,t2,t3` for the K-valley hBN moire potential, then calls `_assemble_interbilayer_terms`. |
-| `get_interbilayerterms_Kp(...)` | Same for K' valley. |
+| `get_interbilayerterms_K(...)` | Top-level: defines q-vectors and sublattice hopping matrices `t1,t2,t3` for the K-valley hBN moire potential, then calls `_assemble_interbilayer_terms`.  Uses corrected conventions: `w = exp(-i*2pi/3)`, `psi = +0.29`, order `[3,1,2]`. |
+| `get_interbilayerterms_Kp(...)` | Same for K' valley (negated q-vectors, conjugated T matrices). |
+| `get_interbilayerterms_K_testing(...)` | Parameterized version with configurable `order`, `sxflag`, `dagger`, `conj_flag`, `psi_conj` flags.  Used by `hofstadter_testing.py` for convention exploration. |
+| `get_interbilayerterms_Kp_testing(...)` | Same for K' valley. |
 | `get_intermonolayerH_K(N, theta, B, labels, params)` | Inter-monolayer coupling (gamma1 constant, gamma3 raising, gamma4 lowering operators). K valley. |
 | `get_intermonolayerH_Kp(N, theta, B, labels, params)` | Same for K' valley (operator directions reversed). |
 | `get_intralayerH_K(N, theta, B, labels, params, delta_site)` | Intralayer kinetic Hamiltonian for K valley.  Builds upper-triangular part, then symmetrizes via `H + H^dagger`.  Includes sublattice mass `delta`. |
 | `get_intralayerH_Kp(N, theta, B, labels, params, delta_site)` | Same for K' valley. |
 
-### `main_v2.py`
+### `main_v3.py` (production driver)
 
 | Function | Purpose |
 |---|---|
 | `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths.  Operates on pre-scaled data (already multiplied by `1000/Q_E`) so no per-k-point unit conversion is needed.  Uses `eigvalsh(overwrite_a=True, check_finite=False)` to avoid internal copies. |
 | `_init_kpoint_worker(shared)` | Pool initializer: stores shared matrices in module-global `_worker_shared` so they are pickled once per worker, not per task. |
 | `_solve_kpoint(args)` | Pool worker entry point.  Unpacks `(kc, kpt)`, calls `_solve_kpoint_core`, returns `(kc, tek_K, tek_Kp)`. |
-| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer or bilayer depending on `nlayers`), pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
+| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer or bilayer depending on `nlayers`) using doubled chain (`Nq = 2*qq`), pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
 | `main(input_file)` | CLI wrapper: calls `do_calc`, saves result to `.npz` or `.mat`. |
+
+Differences from `main_v2.py` (legacy):
+
+| Feature | main_v2 | main_v3 |
+|---|---|---|
+| Chain size | `Nq = qq` | `Nq = 2*qq` |
+| BZ vectors | `[b1/pp, b2*qq/pp]` | `[b1/pp/2, b2/pp]` |
+| T matrices | Old conventions | Corrected (order=[3,1,2], conj=1, psiconj=1) |
+| BLAS threads | `OPENBLAS_NUM_THREADS=1` | `OPENBLAS_NUM_THREADS=1` |
+| U identity | `np.eye(dim1)` | `np.eye(Hintra.shape[0])` (post-chop) |
+
+### `hofstadter_testing.py` (convention exploration)
+
+Sweeps over rational flux values `qq/pp` up to `ppmax`, parallelized across
+flux points.  Supports configurable T-matrix conventions via CLI flags:
+
+```
+python hofstadter_testing.py input_testing.txt \
+    --order 3 1 2 --sxflag 0 --dagger 0 \
+    --conj_flag 1 --psi_conj 1 --ppmax 10
+```
+
+Features incremental `.mat` checkpoint/resume: saves after each flux point
+and skips already-computed `qq/pp` pairs on restart.
 
 ---
 
@@ -165,12 +194,14 @@ This chopping happens independently in each Hamiltonian builder and in the
 
 ## 4. Matrix dimensions
 
-For a given `(pp, qq, N)`:
+For a given `(pp, qq, N)` with doubled chain (`main_v3.py`):
 
-- Guiding centers per magnetic unit cell: `Nq = qq`
-- Basis states per layer before chopping: `2 * qq * (N+1)` (two sublattices)
-- After chopping LL_N from one sublattice: `qq*N + qq*(N+1) = qq*(2N+1)`
-- Total Hamiltonian dimension: `nlayers * qq*(2N+1)`
+- Guiding centers per magnetic unit cell: `Nq = 2*qq`
+- Basis states per layer before chopping: `2 * 2*qq * (N+1)` (two sublattices)
+- After chopping LL_N from one sublattice: `2*qq*(2N+1)`
+- Total Hamiltonian dimension: `nlayers * 2*qq*(2N+1)`
+
+Legacy (`main_v2.py`) uses `Nq = qq`, giving half the dimension per layer.
 
 N is determined automatically:
 `N = LL_multiplier * round(max(hbar*vF*ktheta, w) / eneLL)^2`, capped at
@@ -188,10 +219,12 @@ b1 = ktheta * [0, -1]
 b2 = ktheta * [sqrt(3)/2, 1/2]
 ```
 
-The magnetic BZ vectors are `b1/pp` and `b2/pp`.  The k-mesh is a uniform
-`nk1 x nk2` grid over the magnetic BZ, flattened in column-major (Fortran)
-order to match MATLAB conventions.  Each k-point is shifted by `-M_mag`
-before entering the Hamiltonian.
+With the doubled chain, the magnetic BZ vectors are `b1/(2*pp)` and
+`b2/pp`.  The k-mesh is a uniform `nk1 x nk2` grid over this BZ,
+flattened in column-major (Fortran) order to match MATLAB conventions.
+Each k-point is shifted by `-M_mag` before entering the Hamiltonian.
+
+Legacy (`main_v2.py`) uses BZ vectors `b1/pp` and `b2*qq/pp`.
 
 ---
 
@@ -313,7 +346,8 @@ Q_E        = 1.6e-19     C
 A_GRAPHENE = 2.46e-10    m
 A_HBN      = 2.504e-10   m
 vF         = 1e6         m/s  (Fermi velocity, default)
-psi        = -0.29       rad  (hBN moire coupling phase)
+psi        = +0.29       rad  (hBN moire coupling phase)
+w          = exp(-i*2pi/3)    (sublattice phase rotation)
 ```
 
 ---
@@ -322,8 +356,10 @@ psi        = -0.29       rad  (hBN moire coupling phase)
 
 | File | Role |
 |---|---|
-| `main_v2.py` | Hofstadter engine: `do_calc`, k-point solver, CLI entry point |
-| `hamiltonian.py` | Hamiltonian construction (intralayer, intermonolayer, interbilayer) |
+| `main_v3.py` | Production Hofstadter engine (doubled chain, corrected coupling) |
+| `main_v2.py` | Legacy Hofstadter engine (single chain, old coupling conventions) |
+| `hofstadter_testing.py` | Butterfly sweep engine with configurable T-matrix conventions |
+| `hamiltonian.py` | Hamiltonian construction (intralayer, intermonolayer, interbilayer, testing variants) |
 | `numerics.py` | Laguerre polynomials, F_nm matrix elements, table builder |
 | `basis.py` | `outer_product`, `getindices` |
 | `parser.py` | MATLAB-style input file parser (shared) |
@@ -331,12 +367,16 @@ psi        = -0.29       rad  (hBN moire coupling phase)
 | `zerofield.py` | Zero-field engine: moire geometry, plane-wave Hamiltonian, k-path solver |
 | `input_test.txt` | Example Hofstadter input (pp=1, qq=1) |
 | `input_p3_q1.txt` | Example Hofstadter input (pp=3, qq=1) |
+| `input_testing.txt` | Testing input (monolayer, convention exploration) |
+| `input_testing_BG.txt` | Testing input (bilayer, convention exploration) |
 | `input_zerofield.txt` | Example zero-field input |
-| `validate.py` | Hofstadter benchmark comparison |
+| `validate.py` | Legacy Hofstadter benchmark comparison (main_v2) |
+| `validate_testing_BG.py` | Bilayer testing benchmark comparison against MATLAB |
 | `validate_zerofield.py` | Zero-field benchmark comparison |
 | `plot_zerofield.m` | MATLAB plotting script for zero-field bands |
-| `bands_p{pp}_q{qq}.mat` | Hofstadter MATLAB benchmark data |
+| `bands_p{pp}_q{qq}.mat` | Hofstadter MATLAB benchmark data (legacy) |
 | `matlab_code/zerofield/` | Original MATLAB zero-field code and benchmark (`bands_BG.mat`) |
+| `matlab_debugging/` | MATLAB debugging/benchmark scripts for convention testing |
 
 ---
 
@@ -347,6 +387,14 @@ runtime for large matrices.  At the typical scale of pp=15, qq=1 (matrix
 size 1178x1178), ~97% of wall time is spent in LAPACK.
 
 ### Optimizations in place
+
+- **BLAS thread pinning**: `OPENBLAS_NUM_THREADS=1` is set before numpy
+  import in both `main_v3.py` and `hofstadter_testing.py`.  OpenBLAS
+  eigvalsh scales poorly beyond 4 threads for the matrix sizes used here
+  (1960x1960 benchmark: 1 thread = 1.16s, 4 threads = 0.63s, 28 threads
+  = 1.45s).  With multiprocessing pools, the default (all cores per BLAS
+  call) causes catastrophic thread oversubscription.  Pinning to 1 BLAS
+  thread and using pool workers for parallelism gives best throughput.
 
 - **Vectorized F_nm table construction**: `build_fnm_tables` computes all
   matrix elements in a single vectorized pass using log-space arithmetic
