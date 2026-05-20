@@ -1,7 +1,7 @@
 # CLAUDE.md — Development Mode
 
 This project computes moire band structures for mono- or bilayer graphene
-on hBN.  Two calculation modes:
+on hBN.  Three calculation modes:
 
 1. **Hofstadter** (`main_v3.py`): Magnetic Bloch bands in a Landau-level
    basis at rational flux qq/pp.  Uses corrected moire coupling matrices
@@ -9,6 +9,10 @@ on hBN.  Two calculation modes:
    (Nq=2*qq).  Legacy driver `main_v2.py` is kept for reference.
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
    expansion along a k-path through the moire BZ.
+3. **Semiclassical** (`semiclassical/`): Full BZ k-mesh band structure
+   plus Berry curvature, orbital moment, Fukuyama susceptibility, and
+   Onsager semiclassical quantization (Landau level fan diagrams).
+   Also pushed to separate repo: `github.com/phaney2/semiclassical_hofstadter`.
 
 ## Code layout
 
@@ -34,6 +38,18 @@ on hBN.  Two calculation modes:
 | `matlab_code/zerofield/` | Original MATLAB zero-field code and benchmark (`bands_BG.mat`) |
 | `matlab_code/` | Original MATLAB Hofstadter code |
 | `matlab_debugging/` | MATLAB scripts for debugging/comparison |
+| `semiclassical/` | Semiclassical engine (see below) |
+
+### Semiclassical code (`semiclassical/`)
+
+| File | Purpose |
+|---|---|
+| `semiclassical.py` | Core engine: BZ k-mesh, Berry curvature, orbital moment, susceptibility, Onsager pipeline |
+| `isoenergy.py` | Contour-based isoenergy orbit detection (marching squares + shoelace area) |
+| `onsager.py` | Onsager quantization solver: S(E)/(2π)² + corrections = B(n+½)/φ₀ |
+| `input.txt` | Example input with Onsager parameters |
+| `doc_technical.md` | Technical reference for the semiclassical code |
+| `doc_user_guide.md` | Input/output reference for the semiclassical code |
 
 ## Before making changes
 
@@ -50,6 +66,10 @@ than re-parsing the source.
   internally. Final eigenvalues are converted back to meV.
 - **Zero-field units**: Input parameters are in meV; converted to eV
   internally. Eigenvalues are output in eV.
+- **Semiclassical units**: Input in meV; internal calculation in eV;
+  output E in meV, Oz/Lz/vol_M in SI (m²), dChi_dE in SI.
+  Post-processing conversions: Oz×1e-20, Lz×1e-20×1e3, vol_M×1e-20,
+  dChi_dE×1e-20×hbar⁴.
 - The basis label system (composite strings with `_` separators, searched
   via substring intersection) is load-bearing. Any change to label
   formatting will silently break `getindices` lookups.
@@ -96,6 +116,44 @@ relative to main_v2 for the same flux.
 The default `input_zerofield.txt` uses `NQ=7` (49 Q-vectors, dim=196 for
 bilayer, dim=98 for monolayer). The MATLAB benchmark `bands_BG.mat` uses
 `theta=1°`, `nlayers=2`, `hbar_vF=5.2657`.
+
+### Semiclassical
+MATLAB benchmarks are at `<OneDrive>/MATLAB/Duartes_code/Semiclassical_zero_Field/`.
+`benchmark_data_30.mat` (nk=30) and `benchmark_data_100.mat` (nk=100)
+contain E_K, Oz_K, Lz_K, area_K, LLK, etc.
+
+Band structure quantities (E_K, Oz_K, Lz_K, kpoints, vol_M) match MATLAB
+to machine precision (~1e-14 relative). Orbit areas match to machine
+precision for all resolved orbits. LL fan diagrams have known remaining
+differences — see below.
+
+## Semiclassical — known issues and MATLAB differences
+
+1. **MATLAB Onsager bug (valid mask)**: MATLAB's `get_semiclassical_LL.m`
+   evaluates the Onsager condition at ALL energies, including those with
+   no orbit (area=0). The `dL/dE` term (nonzero everywhere due to Fermi
+   derivative broadening) can create spurious minima. Python correctly
+   sets the residual to `inf` at zero-area energies. This causes LL
+   differences for bands with few orbit energies (e.g., band 6).
+
+2. **MATLAB chi bug**: `get_semiclassical_LL.m` line 31 ends with
+   semicolon, making the `chiflag * dChi_dE` term a no-op. Use
+   `termflags=(1,1,0)` when comparing against MATLAB.
+
+3. **Enclosed Berry curvature sign**: There is an unresolved systematic
+   shift in LL positions for bands in the +40 to +60 meV range (K valley).
+   Flipping the sign of the enclosed BC term partially corrects it.
+   Likely a contour winding / "inside vs outside" convention difference
+   between Python's `find_contours` + `Path.contains_points` and MATLAB's
+   `contourc` + `inpolygon`. Needs investigation.
+
+4. **Energy grid resolution**: The Onsager solver uses `argmin` over a
+   discrete energy grid. With `kT=3 meV` broadening, energy grids coarser
+   than ~2 meV cause 1-bin LL shifts. Use `elist_onsager` for a denser
+   grid independent of the susceptibility grid.
+
+5. **`include_chi` flag**: Set `include_chi = 0` in the input file to
+   skip the expensive Fukuyama susceptibility loop. Defaults to 1.
 
 ## What not to do
 

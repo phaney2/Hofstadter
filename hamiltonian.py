@@ -263,6 +263,70 @@ def get_intralayerH_Kp(N, theta, B, qNslabels, params, delta_site):
     return Hintra
 
 
+def get_berry_connection_K(N, B, qNslabels):
+    """Berry connection matrices (Ax, Ay) in the LL basis for K valley."""
+    lB = (HBAR / (Q_E * B)) ** 0.5
+    dim = len(qNslabels)
+    Ax = np.zeros((dim, dim), dtype=complex)
+    Ay = np.zeros((dim, dim), dtype=complex)
+
+    for c in range(N + 1):
+        LLc = f"LL{c}_"
+        LLcp1 = f"LL{c + 1}_"
+
+        A_LLc = getindices(qNslabels, ['A', LLc])
+        A_LLcp1 = getindices(qNslabels, ['A', LLcp1])
+        B_LLc = getindices(qNslabels, ['B', LLc])
+        B_LLcp1 = getindices(qNslabels, ['B', LLcp1])
+
+        coeff = lB / np.sqrt(2) * np.sqrt(c + 1)
+        for rowc in range(len(A_LLcp1)):
+            Ax[A_LLc[rowc], A_LLcp1[rowc]] += -1j * coeff
+            Ax[B_LLc[rowc], B_LLcp1[rowc]] += -1j * coeff
+            Ay[A_LLc[rowc], A_LLcp1[rowc]] += coeff
+            Ay[B_LLc[rowc], B_LLcp1[rowc]] += coeff
+
+    Ax = Ax + Ax.T.conj()
+    Ay = Ay + Ay.T.conj()
+
+    chop_idx = getindices(qNslabels, ['B', f"LL{N}_"])
+    Ax = np.delete(np.delete(Ax, chop_idx, axis=0), chop_idx, axis=1)
+    Ay = np.delete(np.delete(Ay, chop_idx, axis=0), chop_idx, axis=1)
+    return Ax, Ay
+
+
+def get_berry_connection_Kp(N, B, qNslabels):
+    """Berry connection matrices (Ax, Ay) in the LL basis for K' valley."""
+    lB = (HBAR / (Q_E * B)) ** 0.5
+    dim = len(qNslabels)
+    Ax = np.zeros((dim, dim), dtype=complex)
+    Ay = np.zeros((dim, dim), dtype=complex)
+
+    for c in range(N + 1):
+        LLc = f"LL{c}_"
+        LLcp1 = f"LL{c + 1}_"
+
+        A_LLc = getindices(qNslabels, ['A', LLc])
+        A_LLcp1 = getindices(qNslabels, ['A', LLcp1])
+        B_LLc = getindices(qNslabels, ['B', LLc])
+        B_LLcp1 = getindices(qNslabels, ['B', LLcp1])
+
+        coeff = lB / np.sqrt(2) * np.sqrt(c + 1)
+        for rowc in range(len(A_LLcp1)):
+            Ax[A_LLc[rowc], A_LLcp1[rowc]] += -1j * coeff
+            Ax[B_LLc[rowc], B_LLcp1[rowc]] += -1j * coeff
+            Ay[A_LLc[rowc], A_LLcp1[rowc]] += coeff
+            Ay[B_LLc[rowc], B_LLcp1[rowc]] += coeff
+
+    Ax = Ax + Ax.T.conj()
+    Ay = Ay + Ay.T.conj()
+
+    chop_idx = getindices(qNslabels, ['A', f"LL{N}_"])
+    Ax = np.delete(np.delete(Ax, chop_idx, axis=0), chop_idx, axis=1)
+    Ay = np.delete(np.delete(Ay, chop_idx, axis=0), chop_idx, axis=1)
+    return Ax, Ay
+
+
 def get_interbilayerterms_K_testing(N, Nq, ktheta, lB, v0, v1, eta, qq, pp,
                                      order, sxflag, dagger, conj_flag, psi_conj):
     q1 = ktheta * np.array([0, -1])
