@@ -12,6 +12,8 @@ on hBN.  Three calculation modes:
 3. **Semiclassical** (`semiclassical/`): Full BZ k-mesh band structure
    plus Berry curvature, orbital moment, Fukuyama susceptibility, and
    Onsager semiclassical quantization (Landau level fan diagrams).
+   Includes non-perturbative B-field mode (`onsager_bfield`) that
+   recomputes orbits on E(k)+gfactor×B×Lz(k) at each field.
    Also pushed to separate repo: `github.com/phaney2/semiclassical_hofstadter`.
 
 ## Code layout

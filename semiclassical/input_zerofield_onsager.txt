@@ -1,8 +1,10 @@
+pp = 0
+qq = 0
 isparallel = 1
-outputfile = 'test.mat'
+outputfile = 'zerofield_onsager.mat'
 theta = 0
-Blist = linspace(0,12,100);
-nmax = 30;
+Blist = linspace(0,12,50);
+nmax = 30
 U = [0 0]
 nk1 = 100
 nk2 = nk1

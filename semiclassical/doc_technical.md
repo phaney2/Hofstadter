@@ -240,6 +240,7 @@ approach. Orbit areas agree with MATLAB benchmark to machine precision.
 ## Parallelization
 
 - k-loop: `multiprocessing.Pool` (embarrassingly parallel)
+- `onsager_bfield`: `multiprocessing.Pool` over B values
 - `OPENBLAS_NUM_THREADS=1` pinned before numpy import
 - `isoenergy_areas` is serial over bands (can be parallelized if needed)
 - For cluster multi-node: run independent B values as separate jobs
@@ -276,6 +277,33 @@ The Onsager step uses its own energy grid (`elist_onsager`, defaults to
 
 Output keys: `Blist` (nB,), `nmax` (scalar), `LL_K_band{i}` (nB, nmax+1)
 and `LL_Kp_band{i}` (nB, nmax+1) for each band with orbits.
+
+## Non-perturbative Onsager (`onsager_bfield`)
+
+An alternative pipeline that includes the orbital moment non-perturbatively.
+Branches directly from bandstructure output (not isoenergy):
+
+```
+bandstructure  →  onsager_bfield
+    (k-mesh)      (B-dependent orbits + LL fan)
+```
+
+At each B, forms the modified energy surface:
+```
+E_mod(k) = E_K(k) + gfactor × B × Lz_K(k)
+```
+
+Then computes isoenergy contours on E_mod, finds enclosed Berry curvature,
+and solves the Onsager condition. Since the orbital moment is already in
+the energy surface, `morbflag` is forced to 0 internally. The `termflags`
+input is 2-element `[BCflag, chiflag]`.
+
+Each B value is independent; parallelized over Blist via `multiprocessing.Pool`
+when `isparallel=1`. The worker calls `isoenergy_areas` directly (not
+`get_energy_resolved_data`) to avoid computing `dL_dE`.
+
+Intermediate data (orbit areas, enclosed BC, energy grids) are saved per B
+for debugging.
 
 ## Hofstadter mode internals
 

@@ -4,6 +4,8 @@ Contour-based isoenergy orbit detection.
 Traces closed orbits at each energy level using marching squares on a
 3x3 BZ-tiled energy surface.  Orbit area is computed via the shoelace
 formula; enclosed k-points are found by polygon containment.
+
+All functions operate on a single band at a time.
 """
 
 import numpy as np
@@ -18,124 +20,116 @@ def _shoelace_area(verts):
     return 0.5 * np.abs(np.dot(x, yp) - np.dot(xp, y))
 
 
-def isoenergy_areas(E_bands, E_levels, vol_M, nk1, nk2):
+def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2):
     """
-    Compute k-space orbit areas and enclosed k-point indices.
+    Compute k-space orbit areas and enclosed k-point indices for one band.
 
     Parameters
     ----------
-    E_bands : (num_bands, Nk_tot) array
-        Band energies at each k-point (any units).
-    E_levels : (NE,) array
+    E_band : (Nk_tot,) array
+        Band energies at each k-point.
+    E_levels : (nE,) array
         Energy values at which to find orbits.
     vol_M : float
-        Real-space moire unit cell area (same length units as k).
+        Real-space moire unit cell area.
     nk1, nk2 : int
-        k-mesh dimensions (E_bands columns = nk1 * nk2).
+        k-mesh dimensions (Nk_tot = nk1 * nk2).
 
     Returns
     -------
     areas : list of lists
-        areas[n][i] = list of orbit areas for band n at energy i,
-        sorted descending.  Empty list if no orbits.
+        areas[i] = list of orbit areas at energy i, sorted descending.
     kindices : list of lists
-        kindices[n][i] = list of 1-D index arrays (into E_bands columns)
-        for k-points inside each orbit.  Ordering matches areas.
+        kindices[i] = list of 1-D index arrays for k-points inside each orbit.
     """
-    num_bands = E_bands.shape[0]
-    NE = len(E_levels)
+    nE = len(E_levels)
     Nk = nk1 * nk2
     BZ_area = (2 * np.pi)**2 / vol_M
     cell_area = BZ_area / Nk
 
-    Emin = E_bands.min(axis=1)
-    Emax = E_bands.max(axis=1)
+    bmin = E_band.min()
+    bmax = E_band.max()
 
-    areas = [[[] for _ in range(NE)] for _ in range(num_bands)]
-    kindices = [[[] for _ in range(NE)] for _ in range(num_bands)]
+    E_2d = E_band.reshape(nk2, nk1, order='F')
 
-    for n in range(num_bands):
-        E_2d = E_bands[n, :].reshape(nk2, nk1, order='F')
-        bmin, bmax = Emin[n], Emax[n]
+    areas = [[] for _ in range(nE)]
+    kindices = [[] for _ in range(nE)]
 
-        for i in range(NE):
-            lvl = E_levels[i]
-            if lvl <= bmin or lvl >= bmax:
+    for i in range(nE):
+        lvl = E_levels[i]
+        if lvl <= bmin or lvl >= bmax:
+            continue
+
+        E_tiled = np.tile(E_2d, (3, 3))
+        contours = find_contours(E_tiled, lvl)
+
+        orbit_areas = []
+        orbit_kidx = []
+
+        for contour in contours:
+            if np.linalg.norm(contour[0] - contour[-1]) > 1.0:
+                continue
+            if not np.allclose(contour[0], contour[-1]):
+                contour = np.vstack([contour, contour[:1]])
+            if len(contour) < 4:
                 continue
 
-            E_tiled = np.tile(E_2d, (3, 3))
-            contours = find_contours(E_tiled, lvl)
+            cx, cy = contour[:-1].mean(axis=0)
+            if cx < nk2 or cx >= 2 * nk2 or cy < nk1 or cy >= 2 * nk1:
+                continue
 
-            orbit_areas = []
-            orbit_kidx = []
+            area_k = _shoelace_area(contour) * cell_area
+            if area_k < cell_area or area_k >= BZ_area - cell_area:
+                continue
 
-            for contour in contours:
-                if np.linalg.norm(contour[0] - contour[-1]) > 1.0:
-                    continue
-                if not np.allclose(contour[0], contour[-1]):
-                    contour = np.vstack([contour, contour[:1]])
-                if len(contour) < 4:
-                    continue
+            r0 = max(int(np.floor(contour[:, 0].min())), 0)
+            r1 = min(int(np.ceil(contour[:, 0].max())), 3 * nk2 - 1)
+            c0 = max(int(np.floor(contour[:, 1].min())), 0)
+            c1 = min(int(np.ceil(contour[:, 1].max())), 3 * nk1 - 1)
 
-                cx, cy = contour[:-1].mean(axis=0)
-                if cx < nk2 or cx >= 2 * nk2 or cy < nk1 or cy >= 2 * nk1:
-                    continue
+            rr, cc = np.meshgrid(
+                np.arange(r0, r1 + 1),
+                np.arange(c0, c1 + 1),
+                indexing='ij')
+            pts = np.column_stack([rr.ravel(), cc.ravel()])
 
-                area_k = _shoelace_area(contour) * cell_area
-                if area_k < cell_area or area_k >= BZ_area - cell_area:
-                    continue
+            inside = Path(contour).contains_points(pts)
 
-                r0 = max(int(np.floor(contour[:, 0].min())), 0)
-                r1 = min(int(np.ceil(contour[:, 0].max())), 3 * nk2 - 1)
-                c0 = max(int(np.floor(contour[:, 1].min())), 0)
-                c1 = min(int(np.ceil(contour[:, 1].max())), 3 * nk1 - 1)
+            orig_r = pts[inside, 0] % nk2
+            orig_c = pts[inside, 1] % nk1
+            orig_lin = np.unique(orig_c * nk2 + orig_r)
 
-                rr, cc = np.meshgrid(
-                    np.arange(r0, r1 + 1),
-                    np.arange(c0, c1 + 1),
-                    indexing='ij')
-                pts = np.column_stack([rr.ravel(), cc.ravel()])
+            if len(orig_lin) == 0 or len(orig_lin) >= Nk:
+                continue
 
-                inside = Path(contour).contains_points(pts)
+            orbit_areas.append(area_k)
+            orbit_kidx.append(orig_lin)
 
-                # F-order linear index: row + col * nk2
-                orig_r = pts[inside, 0] % nk2
-                orig_c = pts[inside, 1] % nk1
-                orig_lin = np.unique(orig_c * nk2 + orig_r)
-
-                if len(orig_lin) == 0 or len(orig_lin) >= Nk:
-                    continue
-
-                orbit_areas.append(area_k)
-                orbit_kidx.append(orig_lin)
-
-            if orbit_areas:
-                order = np.argsort(orbit_areas)[::-1]
-                areas[n][i] = [orbit_areas[j] for j in order]
-                kindices[n][i] = [orbit_kidx[j] for j in order]
+        if orbit_areas:
+            order = np.argsort(orbit_areas)[::-1]
+            areas[i] = [orbit_areas[j] for j in order]
+            kindices[i] = [orbit_kidx[j] for j in order]
 
     return areas, kindices
 
 
-def get_energy_resolved_data(bands_sel, kT, E_bands, Oz, Lz,
+def get_energy_resolved_data(kT, E_band, Oz_band, Lz_band,
                              E_levels, vol_M, nk1, nk2):
     """
-    Compute orbit areas, enclosed Berry curvature, and dL/dE.
+    Compute orbit areas, enclosed Berry curvature, and dL/dE for one band.
 
     Parameters
     ----------
-    bands_sel : array-like
-        Band offset indices (e.g. [-3,-2,...,3]).
     kT : float
-        Thermal broadening (same energy units as E_bands).
-    E_bands : (num_bands, Nk) array
+        Thermal broadening (same energy units as E_band).
+    E_band : (Nk,) array
         Band energies.
-    Oz : (num_bands, Nk) array
-        Berry curvature at each (band, k).
-    Lz : (num_bands, Nk) array
-        Orbital moment at each (band, k).
-    E_levels : (NE,) array
-        Energy grid.
+    Oz_band : (Nk,) array
+        Berry curvature.
+    Lz_band : (Nk,) array
+        Orbital moment.
+    E_levels : (nE,) array
+        Energy grid for this band.
     vol_M : float
         Moire cell area.
     nk1, nk2 : int
@@ -143,40 +137,30 @@ def get_energy_resolved_data(bands_sel, kT, E_bands, Oz, Lz,
 
     Returns
     -------
-    area : (NE, nbands, max_pockets) array
-    enclosedBC : (NE, nbands, max_pockets) array
-    dL_dE : (NE, nbands) array
+    area : (nE, max_pockets) array
+    enclosedBC : (nE, max_pockets) array
+    dL_dE : (nE,) array
     """
-    A, K = isoenergy_areas(E_bands, E_levels, vol_M, nk1, nk2)
-    nbands = len(bands_sel)
-    NE = len(E_levels)
+    A, K = isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2)
+    nE = len(E_levels)
     Nk = nk1 * nk2
     kweight = (2 * np.pi)**2 / (Nk * vol_M)
 
-    max_pockets = 1
-    for n in range(nbands):
-        for i in range(NE):
-            if A[n][i]:
-                max_pockets = max(max_pockets, len(A[n][i]))
+    max_pockets = max((len(a) for a in A if a), default=1)
 
-    area = np.zeros((NE, nbands, max_pockets))
-    enclosedBC = np.zeros((NE, nbands, max_pockets))
+    area = np.zeros((nE, max_pockets))
+    enclosedBC = np.zeros((nE, max_pockets))
 
-    for n in range(nbands):
-        for i in range(NE):
-            if not A[n][i]:
-                continue
-            for p, (a_val, k_idx) in enumerate(zip(A[n][i], K[n][i])):
-                area[i, n, p] = a_val
-                enclosedBC[i, n, p] = np.sum(Oz[n, k_idx]) * kweight
+    for i in range(nE):
+        if not A[i]:
+            continue
+        for p, (a_val, k_idx) in enumerate(zip(A[i], K[i])):
+            area[i, p] = a_val
+            enclosedBC[i, p] = np.sum(Oz_band[k_idx]) * kweight
 
-    # Vectorized dL/dE
-    dL_dE = np.zeros((NE, nbands))
     E_col = E_levels[:, np.newaxis]
-    for n in range(nbands):
-        tek = E_bands[n, :]
-        x = (tek - E_col) / kT
-        dfde = np.exp(-np.abs(x)) / (kT * (1 + np.exp(-np.abs(x)))**2)
-        dL_dE[:, n] = (dfde @ Lz[n, :]) * kweight
+    x = (E_band - E_col) / kT
+    dfde = np.exp(-np.abs(x)) / (kT * (1 + np.exp(-np.abs(x)))**2)
+    dL_dE = (dfde @ Lz_band) * kweight
 
     return area, enclosedBC, dL_dE

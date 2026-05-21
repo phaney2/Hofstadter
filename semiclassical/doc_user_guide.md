@@ -19,14 +19,18 @@ separately by setting `calctype` and providing prior results via
 ```
 bandstructure  →  isoenergy  →  onsager
     (k-mesh)      (orbit areas)   (LL fan)
+
+bandstructure  →  onsager_bfield
+    (k-mesh)      (B-dependent orbits + LL fan)
 ```
 
-| calctype        | Reads from             | Produces                                           |
-|-----------------|------------------------|----------------------------------------------------|
-| `bandstructure` | physics params         | E, Berry curvature, orbital moment, k-mesh          |
-| `isoenergy`     | `inputdata` (bs file)  | orbit areas, enclosed BC, dL/dE                    |
-| `onsager`       | `inputdata` (iso file) | Landau level fan diagrams                          |
-| `all` (default) | physics params         | everything merged into one file                    |
+| calctype          | Reads from             | Produces                                           |
+|-------------------|------------------------|----------------------------------------------------|
+| `bandstructure`   | physics params         | E, Berry curvature, orbital moment, k-mesh          |
+| `isoenergy`       | `inputdata` (bs file)  | orbit areas, enclosed BC, dL/dE                    |
+| `onsager`         | `inputdata` (iso file) | Landau level fan diagrams                          |
+| `onsager_bfield`  | `inputdata` (bs file)  | B-dependent orbits + LL fan (non-perturbative Lz)  |
+| `all` (default)   | physics params         | everything merged into one file                    |
 
 Running stages separately lets you iterate on downstream parameters
 (e.g. different B-field ranges or termflags) without re-running the
@@ -51,14 +55,14 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `moire_psi`  | rad   | Moire coupling phase |
 | `eta`        | eV    | Broadening for Berry curvature |
 | `bands`      | —     | Band offsets from center, e.g. `[-3 -2 -1 0 1 2 3]` |
-| `elist`      | meV   | Energy grid for isoenergy orbit detection, e.g. `linspace(-100,100,100)` |
+| `nE`         | —     | Number of energy points per band for isoenergy orbit detection |
 
 ### Optional parameters
 
 | Parameter       | Default | Description |
 |---|---|---|
-| `calctype`      | `all`   | Stage to run: `bandstructure`, `isoenergy`, `onsager`, or `all` |
-| `inputdata`     | —       | Path to prior stage output file (required for `isoenergy` and `onsager`) |
+| `calctype`      | `all`   | Stage to run: `bandstructure`, `isoenergy`, `onsager`, `onsager_bfield`, or `all` |
+| `inputdata`     | —       | Path to prior stage output file (required for `isoenergy`, `onsager`, `onsager_bfield`) |
 | `theta`         | 0       | Twist angle (radians) |
 | `U`             | [0 0]   | Layer potentials [U_top U_bottom] (meV) |
 | `g3` or `v3`    | 0       | Trigonal warping: `g3` in meV (converted via `v3 = g3 * 2.46 / 1000`), or `v3` in eV·A |
@@ -66,9 +70,9 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `kT`            | 3       | Thermal broadening for dL/dE (meV) |
 | `Blist`         | —       | Magnetic field values (T) for Onsager quantization, e.g. `linspace(0,12,100)` |
 | `nmax`          | 50      | Maximum Landau level index (used with `Blist`) |
-| `elist_onsager` | `elist` | Separate energy grid (meV) for Onsager step; defaults to `elist` if omitted |
 | `termflags`     | [1 1 1] | Onsager correction terms to include: `[BCflag morbflag chiflag]` (see below) |
 | `susceptibility_datafile` | — | Path to susceptibility `.mat` file (for `onsager` stage with `chiflag=1`) |
+| `gfactor`       | 1       | Orbital moment prefactor for `onsager_bfield`: E_mod = E_K + gfactor×B×Lz_K |
 | `outputfile`    | auto    | Output filename; defaults to `electronic_structure_data_{nk1}.mat` |
 
 ### Onsager quantization terms (`termflags`)
@@ -123,7 +127,7 @@ kT = 3
 outputfile = 'results_200.mat'
 
 % Onsager quantization (optional — omit Blist to skip)
-elist = linspace(-100,100,500)
+nE = 500
 Blist = linspace(0,12,100)
 nmax = 50
 termflags = [1 1 0]
@@ -160,7 +164,7 @@ calctype = 'isoenergy'
 inputdata = 'bs_nk100.mat'
 outputfile = 'iso_nk100.mat'
 kT = 3
-elist = linspace(-100,100,500)
+nE = 500
 ```
 
 **Stage 3 — onsager:**
@@ -172,6 +176,27 @@ Blist = linspace(0,12,100)
 nmax = 30
 termflags = [0 1 0]
 ```
+
+**Alternative Stage 3 — onsager_bfield (non-perturbative Lz):**
+```
+calctype = 'onsager_bfield'
+inputdata = 'bs_nk100.mat'
+outputfile = 'onsager_bfield_result.mat'
+isparallel = 1
+Blist = linspace(0,12,50)
+nmax = 30
+nE = 200
+gfactor = 1
+termflags = [1 0]
+```
+
+This mode branches directly from bandstructure output (not isoenergy).
+At each B, it forms E_mod(k) = E_K(k) + gfactor×B×Lz_K(k) and
+recomputes isoenergy contours on the modified energy surface. The
+orbital moment is included non-perturbatively, so `morbflag` is forced
+to 0 internally. The `termflags` array is 2-element: `[BCflag chiflag]`.
+Intermediate orbit data (areas, enclosed BC) are saved per B value for
+debugging.
 
 ## Output file
 
@@ -196,17 +221,22 @@ Use `.mat` extension for MATLAB-compatible output, `.npz` for numpy.
 
 Where `nbands = len(bands)`, `Nk = nk1 * nk2`.
 
-### Isoenergy output (present when `Blist` is in input, or `calctype = isoenergy`)
+### Isoenergy output (present when `nE` is in input, or `calctype = isoenergy`)
 
-| Variable        | Shape                    | Units   | Description |
+Per-band arrays are stored with suffix `_band{n}` where `n` is the 0-based
+band index.  Each band has its own energy grid, auto-determined from the
+band's energy range.
+
+| Variable              | Shape              | Units   | Description |
 |---|---|---|---|
-| `area_K`        | (NE, nbands, max_pockets)| m^-2    | K valley orbit areas |
-| `area_Kp`       | (NE, nbands, max_pockets)| m^-2    | K' valley orbit areas |
-| `enclosedBC_K`  | (NE, nbands, max_pockets)| —       | K valley enclosed Berry curvature |
-| `enclosedBC_Kp` | (NE, nbands, max_pockets)| —       | K' valley enclosed Berry curvature |
-| `dL_dE_K`       | (NE, nbands)             | —       | K valley orbital moment derivative |
-| `dL_dE_Kp`      | (NE, nbands)             | —       | K' valley orbital moment derivative |
-| `E_levels`      | (NE,)                   | meV     | Energy grid used for orbit detection |
+| `nbands`              | scalar             | —       | Number of bands |
+| `E_levels_band{n}`    | (nE,)              | meV     | Energy grid for band n |
+| `area_K_band{n}`      | (nE, npockets)     | m^-2    | K valley orbit areas for band n |
+| `area_Kp_band{n}`     | (nE, npockets)     | m^-2    | K' valley orbit areas for band n |
+| `enclosedBC_K_band{n}`| (nE, npockets)     | —       | K valley enclosed Berry curvature |
+| `enclosedBC_Kp_band{n}`| (nE, npockets)    | —       | K' valley enclosed Berry curvature |
+| `dL_dE_K_band{n}`     | (nE,)              | —       | K valley orbital moment derivative |
+| `dL_dE_Kp_band{n}`    | (nE,)              | —       | K' valley orbital moment derivative |
 
 ### Onsager output (present when `Blist` is in input, or `calctype = onsager`)
 
@@ -219,37 +249,55 @@ Where `nbands = len(bands)`, `Nk = nk1 * nk2`.
 One `LL_band{i}` matrix is saved per band that has closed orbits.
 The index `i` is the 0-based band index within the selected bands array.
 
+### Onsager_bfield output (`calctype = onsager_bfield`)
+
+| Variable                  | Shape                 | Units   | Description |
+|---|---|---|---|
+| `Blist`                   | (nB,)                | T       | Magnetic field values |
+| `nmax`                    | scalar                | —       | Maximum Landau level index |
+| `nE`                      | scalar                | —       | Energy points per band |
+| `nbands`                  | scalar                | —       | Number of bands |
+| `gfactor`                 | scalar                | —       | Orbital moment prefactor |
+| `LL_K_band{n}`            | (nB, nmax+1)          | meV     | K valley LL energies |
+| `LL_Kp_band{n}`           | (nB, nmax+1)          | meV     | K' valley LL energies |
+| `area_K_band{n}`          | (nB, nE, npockets)    | m^-2    | K valley orbit areas per B |
+| `area_Kp_band{n}`         | (nB, nE, npockets)    | m^-2    | K' valley orbit areas per B |
+| `enclosedBC_K_band{n}`    | (nB, nE, npockets)    | —       | K valley enclosed BC per B |
+| `enclosedBC_Kp_band{n}`   | (nB, nE, npockets)    | —       | K' valley enclosed BC per B |
+| `E_levels_K_band{n}`      | (nB, nE)              | meV     | Energy grid per B (K valley) |
+| `E_levels_Kp_band{n}`     | (nB, nE)              | meV     | Energy grid per B (K' valley) |
+
 ## Post-processing pipeline
 
-### 1. Isoenergy orbit areas
+### 1. Isoenergy orbit areas (single band)
 
 ```python
 from isoenergy import get_energy_resolved_data
 import numpy as np
 
-E_levels = np.linspace(-100, 100, 500)   # meV
+E_levels = np.linspace(-50, 50, 200)   # meV, per-band grid
 area, enclosedBC, dL_dE = get_energy_resolved_data(
-    bands, kT, E_K, Oz_K, Lz_K, E_levels, vol_M, nk1, nk2)
+    kT, E_band, Oz_band, Lz_band, E_levels, vol_M, nk1, nk2)
 ```
 
 Returns:
-- `area[i, n, p]` — orbit area at energy i, band n, pocket p (m^-2)
-- `enclosedBC[i, n, p]` — enclosed Berry curvature (dimensionless)
-- `dL_dE[i, n]` — Fermi-weighted orbital moment derivative
+- `area[i, p]` — orbit area at energy i, pocket p (m^-2)
+- `enclosedBC[i, p]` — enclosed Berry curvature (dimensionless)
+- `dL_dE[i]` — Fermi-weighted orbital moment derivative
 
-### 2. Onsager quantization (Landau level fan)
+### 2. Onsager quantization (single band)
 
 ```python
-from onsager import onsager_fan
+from onsager import onsager_fan_band
 
 Blist = np.linspace(0, 12, 100)   # Tesla
-LL, band_indices = onsager_fan(Blist, nmax=30, E_levels=E_levels,
-                                area=area, enclosedBC=enclosedBC,
-                                dL_dE=dL_dE)
+LL = onsager_fan_band(Blist, nmax=30, E_levels=E_levels,
+                      area=area, enclosedBC=enclosedBC,
+                      dL_dE=dL_dE)
 ```
 
-Returns `LL[j]` as (nB, nmax+1) array of Landau level energies for
-each band with nonzero orbits.
+Returns `LL` as (nB, nmax+1) array of Landau level energies, or
+`None` if the band has no closed orbits.
 
 ## Running on a cluster
 

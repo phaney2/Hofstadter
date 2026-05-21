@@ -71,49 +71,53 @@ def run_isoenergy(inp, bs_data):
     nk1 = int(bs_data['nk1'])
     nk2 = int(bs_data['nk2'])
     nbands = bs_data['E_K'].shape[0]
-    bands_sel = np.arange(nbands)
     kT = float(inp.get('kT', 3.0))
+    nE = int(inp['nE'])
 
-    if 'elist_onsager' in inp:
-        E_levels = np.atleast_1d(inp['elist_onsager']).ravel()
-    elif 'elist' in inp:
-        E_levels = np.atleast_1d(inp['elist']).ravel()
-    else:
-        raise ValueError("isoenergy stage requires 'elist_onsager' or 'elist'")
+    print(f"  Isoenergy: nE={nE} per band, {nbands} bands, kT={kT} meV")
 
-    print(f"  Isoenergy: {len(E_levels)} energy levels, kT={kT} meV")
+    result = {'nbands': nbands}
 
-    result = {'E_levels': E_levels}
+    for n in range(nbands):
+        emin = min(bs_data['E_K'][n].min(), bs_data['E_Kp'][n].min())
+        emax = max(bs_data['E_K'][n].max(), bs_data['E_Kp'][n].max())
+        E_levels_n = np.linspace(emin, emax, nE)
+        result[f'E_levels_band{n}'] = E_levels_n
 
-    for valley in ('K', 'Kp'):
-        area, enclosedBC, dL_dE = get_energy_resolved_data(
-            bands_sel, kT,
-            bs_data[f'E_{valley}'], bs_data[f'Oz_{valley}'],
-            bs_data[f'Lz_{valley}'],
-            E_levels, bs_data['vol_M'], nk1, nk2)
+        print(f"    band {n}: E = [{emin:.2f}, {emax:.2f}] meV")
 
-        result[f'area_{valley}'] = area
-        result[f'enclosedBC_{valley}'] = enclosedBC
-        result[f'dL_dE_{valley}'] = dL_dE
+        for valley in ('K', 'Kp'):
+            area, enclosedBC, dL_dE = get_energy_resolved_data(
+                kT,
+                bs_data[f'E_{valley}'][n],
+                bs_data[f'Oz_{valley}'][n],
+                bs_data[f'Lz_{valley}'][n],
+                E_levels_n, bs_data['vol_M'], nk1, nk2)
+
+            result[f'area_{valley}_band{n}'] = area
+            result[f'enclosedBC_{valley}_band{n}'] = enclosedBC
+            result[f'dL_dE_{valley}_band{n}'] = dL_dE
 
     print("  Done.")
     return result
 
 
 def run_onsager(inp, iso_data):
-    from onsager import onsager_fan
+    from onsager import onsager_fan_band
 
     Blist = np.atleast_1d(inp['Blist']).ravel()
     nmax = int(inp.get('nmax', 50))
-    E_levels = np.atleast_1d(iso_data['E_levels']).ravel()
+    nbands = int(iso_data['nbands'])
 
     termflags_raw = np.atleast_1d(
         inp.get('termflags', np.array([1, 1, 1]))).astype(int)
     termflags = tuple(termflags_raw[:3])
 
     chi_data = None
+    chi_E_meV = None
     if 'susceptibility_datafile' in inp:
         chi_data = load_data(inp['susceptibility_datafile'])
+        chi_E_meV = np.atleast_1d(chi_data['E_list']).ravel() * 1000
         print(f"  Loaded susceptibility from {inp['susceptibility_datafile']}")
 
     print(f"  Onsager: {len(Blist)} B values, nmax={nmax}, termflags={termflags}")
@@ -121,21 +125,152 @@ def run_onsager(inp, iso_data):
     result = {'Blist': Blist, 'nmax': nmax}
 
     for valley in ('K', 'Kp'):
-        dChi = None
-        if chi_data is not None:
-            dChi = np.atleast_1d(chi_data.get(f'dChi_dE_{valley}')).ravel()
+        n_with_orbits = 0
+        for n in range(nbands):
+            key = f'area_{valley}_band{n}'
+            if key not in iso_data:
+                continue
 
-        LL_all, band_indices = onsager_fan(
-            Blist, nmax, E_levels,
-            iso_data[f'area_{valley}'],
-            iso_data[f'enclosedBC_{valley}'],
-            iso_data[f'dL_dE_{valley}'],
-            dChi_dE=dChi, termflags=termflags)
+            E_levels_n = np.atleast_1d(iso_data[f'E_levels_band{n}']).ravel()
 
-        for LL, bi in zip(LL_all, band_indices):
-            result[f'LL_{valley}_band{bi}'] = LL
+            dChi = None
+            if chi_data is not None:
+                dChi_raw = np.atleast_1d(
+                    chi_data[f'dChi_dE_{valley}']).ravel()
+                dChi = np.interp(E_levels_n, chi_E_meV, dChi_raw)
 
-        print(f"  {valley} valley: {len(LL_all)} bands with orbits")
+            LL = onsager_fan_band(
+                Blist, nmax, E_levels_n,
+                iso_data[key],
+                iso_data[f'enclosedBC_{valley}_band{n}'],
+                np.atleast_1d(iso_data[f'dL_dE_{valley}_band{n}']).ravel(),
+                dChi_dE=dChi, termflags=termflags)
+
+            if LL is not None:
+                result[f'LL_{valley}_band{n}'] = LL
+                n_with_orbits += 1
+
+        print(f"  {valley} valley: {n_with_orbits} bands with orbits")
+
+    print("  Done.")
+    return result
+
+
+def _onsager_bfield_worker(args):
+    from isoenergy import isoenergy_areas
+    from onsager import onsager_fan_band
+
+    (B, E_bands, Lz_bands, Oz_bands,
+     vol_M, nk1, nk2, nE, nmax, gfactor, termflags) = args
+
+    nbands = E_bands.shape[0]
+    Nk = nk1 * nk2
+    kweight = (2 * np.pi)**2 / (Nk * vol_M)
+    termflags_3 = (int(termflags[0]), 0, int(termflags[1]))
+
+    band_results = {}
+    for n in range(nbands):
+        E_mod = E_bands[n] + gfactor * B * Lz_bands[n]
+        E_levels = np.linspace(E_mod.min(), E_mod.max(), nE)
+
+        A, K = isoenergy_areas(E_mod, E_levels, vol_M, nk1, nk2)
+
+        max_pockets = max((len(a) for a in A if a), default=1)
+        area = np.zeros((nE, max_pockets))
+        enclosedBC = np.zeros((nE, max_pockets))
+
+        for i in range(nE):
+            if not A[i]:
+                continue
+            for p, (a_val, k_idx) in enumerate(zip(A[i], K[i])):
+                area[i, p] = a_val
+                enclosedBC[i, p] = np.sum(Oz_bands[n][k_idx]) * kweight
+
+        LL = onsager_fan_band(
+            [B], nmax, E_levels, area, enclosedBC,
+            np.zeros(nE), termflags=termflags_3)
+
+        band_results[n] = {
+            'area': area,
+            'enclosedBC': enclosedBC,
+            'E_levels': E_levels,
+            'LL': LL[0] if LL is not None else None,
+        }
+
+    return band_results
+
+
+def run_onsager_bfield(inp, bs_data):
+    Blist = np.atleast_1d(inp['Blist']).ravel()
+    nmax = int(inp.get('nmax', 50))
+    nE = int(inp['nE'])
+    gfactor = float(inp.get('gfactor', 1.0))
+    isparallel = int(inp.get('isparallel', 0))
+
+    termflags_raw = np.atleast_1d(
+        inp.get('termflags', np.array([1, 0]))).astype(int)
+    termflags = tuple(termflags_raw[:2])
+
+    nk1 = int(bs_data['nk1'])
+    nk2 = int(bs_data['nk2'])
+    vol_M = float(bs_data['vol_M'])
+    nbands = bs_data['E_K'].shape[0]
+    nB = len(Blist)
+
+    print(f"  onsager_bfield: {nB} B values, nmax={nmax}, nE={nE}, "
+          f"gfactor={gfactor}, termflags={termflags}")
+
+    result = {'Blist': Blist, 'nmax': nmax, 'nE': nE,
+              'nbands': nbands, 'gfactor': gfactor}
+
+    for valley in ('K', 'Kp'):
+        E_v = bs_data[f'E_{valley}']
+        Lz_v = bs_data[f'Lz_{valley}']
+        Oz_v = bs_data[f'Oz_{valley}']
+
+        args_list = [
+            (B, E_v, Lz_v, Oz_v, vol_M, nk1, nk2,
+             nE, nmax, gfactor, termflags)
+            for B in Blist
+        ]
+
+        if isparallel:
+            import multiprocessing
+            with multiprocessing.Pool() as pool:
+                all_results = pool.map(_onsager_bfield_worker, args_list)
+        else:
+            all_results = [_onsager_bfield_worker(a) for a in args_list]
+
+        for n in range(nbands):
+            max_pock = max(all_results[iB][n]['area'].shape[1]
+                          for iB in range(nB))
+
+            LL_arr = np.full((nB, nmax + 1), np.nan)
+            area_arr = np.zeros((nB, nE, max_pock))
+            bc_arr = np.zeros((nB, nE, max_pock))
+            elev_arr = np.zeros((nB, nE))
+
+            has_orbits = False
+            for iB in range(nB):
+                br = all_results[iB][n]
+                np_b = br['area'].shape[1]
+                area_arr[iB, :, :np_b] = br['area']
+                bc_arr[iB, :, :np_b] = br['enclosedBC']
+                elev_arr[iB, :] = br['E_levels']
+                if br['LL'] is not None:
+                    LL_arr[iB, :] = br['LL']
+                    has_orbits = True
+
+            result[f'area_{valley}_band{n}'] = area_arr
+            result[f'enclosedBC_{valley}_band{n}'] = bc_arr
+            result[f'E_levels_{valley}_band{n}'] = elev_arr
+            if has_orbits:
+                result[f'LL_{valley}_band{n}'] = LL_arr
+
+        n_with_orbits = sum(
+            1 for n in range(nbands)
+            if f'LL_{valley}_band{n}' in result)
+        print(f"  {valley} valley: {n_with_orbits} bands with orbits")
 
     print("  Done.")
     return result
@@ -172,16 +307,25 @@ if __name__ == '__main__':
         outfile = inp.get('outputfile', 'onsager_data.mat')
         save_result(result, outfile)
 
+    elif calctype == 'onsager_bfield':
+        print("=== Stage: onsager_bfield ===")
+        bs_data = load_data(inp['inputdata'])
+        result = run_onsager_bfield(inp, bs_data)
+        outfile = inp.get('outputfile', 'onsager_bfield_data.mat')
+        save_result(result, outfile)
+
     elif calctype == 'all':
         print("=== Running all stages ===")
         bs_result = run_bandstructure(inp, fpath)
+        result = bs_result
 
-        if 'Blist' in inp:
+        if 'nE' in inp:
             iso_result = run_isoenergy(inp, bs_result)
-            ons_result = run_onsager(inp, iso_result)
-            result = {**bs_result, **iso_result, **ons_result}
-        else:
-            result = bs_result
+            result = {**result, **iso_result}
+
+            if 'Blist' in inp:
+                ons_result = run_onsager(inp, iso_result)
+                result = {**result, **ons_result}
 
         outfile = inp.get('outputfile',
                           f'electronic_structure_data_{int(inp["nk1"])}.mat')
@@ -190,4 +334,4 @@ if __name__ == '__main__':
     else:
         raise ValueError(
             f"Unknown calctype: {calctype!r}. "
-            f"Choose from: bandstructure, isoenergy, onsager, all")
+            f"Choose from: bandstructure, isoenergy, onsager, onsager_bfield, all")

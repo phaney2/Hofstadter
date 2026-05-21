@@ -2,7 +2,8 @@
 Semiclassical Onsager quantization.
 
 Computes Landau level fan diagram E(B) from orbit areas, enclosed Berry
-curvature, and orbital moment derivative dL/dE.
+curvature, and orbital moment derivative dL/dE.  Operates on a single
+band at a time.
 """
 
 import numpy as np
@@ -13,15 +14,10 @@ HBAR_SI = 1.05457182e-34  # J*s
 PHI0 = 2 * np.pi * HBAR_SI / EC
 
 
-def onsager_fan(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
-                dChi_dE=None, termflags=(1, 1, 1)):
+def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
+                     dChi_dE=None, termflags=(1, 1, 1)):
     """
-    Solve the Onsager quantization condition for each band.
-
-    S(E)/(2pi)^2 + BCflag * Phi_B*B/(2pi*phi0)
-                 + morbflag * (dL/dE)*B/(2pi*phi0)
-                 + chiflag * (2pi)*dChi/dE * B^2 / phi0^2
-                 = B*(n+1/2)/phi0
+    Solve the Onsager quantization condition for one band.
 
     Parameters
     ----------
@@ -29,64 +25,51 @@ def onsager_fan(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
         Magnetic field values in Tesla.
     nmax : int
         Maximum Landau level index.
-    E_levels : (NE,) array
-        Energy grid (same units as area/enclosedBC/dL_dE).
-    area : (NE, nbands, npockets) array
+    E_levels : (nE,) array
+        Energy grid for this band.
+    area : (nE, npockets) array
         Orbit areas at each energy.
-    enclosedBC : (NE, nbands, npockets) array
+    enclosedBC : (nE, npockets) array
         Enclosed Berry curvature at each energy.
-    dL_dE : (NE, nbands) array
+    dL_dE : (nE,) array
         Energy derivative of orbital moment.
-    dChi_dE : (NE,) array or None
-        Susceptibility derivative. Required if chiflag is set.
+    dChi_dE : (nE,) array or None
+        Susceptibility derivative (interpolated to this band's grid).
     termflags : (3,) tuple of {0, 1}
-        (BCflag, morbflag, chiflag) — toggle each correction term.
+        (BCflag, morbflag, chiflag).
 
     Returns
     -------
-    LL_all : list of (nB, nmax+1) arrays
-        Landau level energies for each band that has nonzero orbits.
-        Each entry corresponds to one band.
-    band_indices : list of int
-        Which band index each LL_all entry corresponds to.
+    LL : (nB, nmax+1) array or None
+        Landau level energies.  None if no orbits found.
     """
     BCflag, morbflag, chiflag = termflags
 
+    tarea = area[:, 0]
+    if np.max(tarea) == 0:
+        return None
+
     nB = len(Blist)
-    NE, nbands, npockets = area.shape
+    tBC = enclosedBC[:, 0]
 
     n_vec = np.arange(nmax + 1).reshape(1, 1, -1)       # 1 x 1 x (nmax+1)
     B_vec = np.asarray(Blist).reshape(1, -1, 1)          # 1 x nB x 1
 
     rhs = B_vec * (n_vec + 0.5) / PHI0                   # 1 x nB x (nmax+1)
 
-    LL_all = []
-    band_indices = []
+    B2 = B_vec[:, :, 0]                                   # 1 x nB
+    base = -tarea[:, np.newaxis] * np.ones_like(B2) / (2 * np.pi)**2
+    if BCflag:
+        base -= tBC[:, np.newaxis] * B2 / (2 * np.pi * PHI0)
+    if morbflag:
+        base -= dL_dE[:, np.newaxis] * B2 / (2 * np.pi * PHI0)
+    if chiflag and dChi_dE is not None:
+        base -= (2 * np.pi) * dChi_dE[:, np.newaxis] * B2**2 / PHI0**2
 
-    for bandc in range(nbands):
-        tarea = area[:, bandc, 0]
-        if np.max(tarea) == 0:
-            continue
+    onsager = rhs + base[:, :, np.newaxis]                 # nE x nB x (nmax+1)
+    valid = tarea > 0
+    onsager[~valid, :, :] = np.inf
+    ind = np.argmin(np.abs(onsager), axis=0)               # nB x (nmax+1)
+    LL = E_levels[ind]
 
-        tBC = enclosedBC[:, bandc, 0]
-        tdL_dE = dL_dE[:, bandc]
-
-        B2 = B_vec[:, :, 0]                                         # 1 x nB
-        base = -tarea[:, np.newaxis] * np.ones_like(B2) / (2 * np.pi)**2  # NE x nB
-        if BCflag:
-            base -= tBC[:, np.newaxis] * B2 / (2 * np.pi * PHI0)
-        if morbflag:
-            base -= tdL_dE[:, np.newaxis] * B2 / (2 * np.pi * PHI0)
-        if chiflag and dChi_dE is not None:
-            base -= (2 * np.pi) * dChi_dE[:, np.newaxis] * B2**2 / PHI0**2
-
-        onsager = rhs + base[:, :, np.newaxis]                      # NE x nB x (nmax+1)
-        valid = tarea > 0                                           # NE mask
-        onsager[~valid, :, :] = np.inf
-        ind = np.argmin(np.abs(onsager), axis=0)                    # nB x (nmax+1)
-        LL = E_levels[ind]                                          # nB x (nmax+1)
-
-        LL_all.append(LL)
-        band_indices.append(bandc)
-
-    return LL_all, band_indices
+    return LL
