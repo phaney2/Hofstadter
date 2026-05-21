@@ -66,7 +66,8 @@ def build_hofstadter_setup(inp):
     Nmax = int(inp.get('Nmax', 5000))
     gamma = float(inp.get('gamma', 1))
     vF = float(inp.get('vF', 1e6))
-    num_bands = int(inp['num_bands'])
+    bands_sel = np.atleast_1d(inp['bands']).astype(int)
+    num_bands = 2 * (int(np.max(np.abs(bands_sel))) + 1)
     nremotebands = int(inp.get('nremotebands', 300))
 
     # --- Derived quantities (SI) ---

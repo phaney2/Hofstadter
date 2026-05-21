@@ -6,8 +6,31 @@
 python semiclassical.py input_benchmark.txt
 ```
 
-This computes the moire band structure, Berry curvature, orbital moment,
-and Fukuyama susceptibility, then saves everything to a `.mat` file.
+This computes the moire band structure, Berry curvature, and orbital
+moment, then saves everything to a `.mat` file.
+
+## Stage pipeline
+
+The calculation is split into three independent stages.  By default all
+stages run end-to-end (`calctype = all`), but each stage can be run
+separately by setting `calctype` and providing prior results via
+`inputdata`:
+
+```
+bandstructure  →  isoenergy  →  onsager
+    (k-mesh)      (orbit areas)   (LL fan)
+```
+
+| calctype        | Reads from             | Produces                                           |
+|-----------------|------------------------|----------------------------------------------------|
+| `bandstructure` | physics params         | E, Berry curvature, orbital moment, k-mesh          |
+| `isoenergy`     | `inputdata` (bs file)  | orbit areas, enclosed BC, dL/dE                    |
+| `onsager`       | `inputdata` (iso file) | Landau level fan diagrams                          |
+| `all` (default) | physics params         | everything merged into one file                    |
+
+Running stages separately lets you iterate on downstream parameters
+(e.g. different B-field ranges or termflags) without re-running the
+expensive k-mesh calculation.
 
 ## Input file
 
@@ -21,29 +44,31 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `nk2`        | —     | k-mesh points along G2 (can set `nk2 = nk1`) |
 | `NQ`         | —     | Moire Q-vector grid: NQ x NQ, centered at Q=0 |
 | `Nlayers`    | —     | 1 = monolayer, 2 = bilayer |
-| `vF`         | eV·A  | hbar * v_F (Dirac velocity parameter) |
-| `gamma1`     | eV    | Interlayer coupling (bilayer only) |
-| `V0`         | meV   | Moire scalar potential |
-| `V1`         | meV   | Moire vector potential |
+| `g0` or `vF` | meV or eV·A | Dirac velocity: `g0` in meV (converted via `vF = g0 * 2.46 / 1000`), or `vF` directly in eV·A |
+| `g1` or `gamma1` | meV or eV | Interlayer coupling (bilayer only): `g1` in meV, or `gamma1` in eV |
+| `v0` (or `V0`) | meV   | Moire scalar potential |
+| `v1` (or `V1`) | meV   | Moire vector potential |
 | `moire_psi`  | rad   | Moire coupling phase |
-| `eta`        | eV    | Broadening for Berry curvature and susceptibility |
+| `eta`        | eV    | Broadening for Berry curvature |
 | `bands`      | —     | Band offsets from center, e.g. `[-3 -2 -1 0 1 2 3]` |
-| `nebin`      | —     | Number of energy bins for susceptibility |
-| `elist`      | meV   | Energy list for susceptibility, e.g. `linspace(-100,100,nebin)` |
+| `elist`      | meV   | Energy grid for isoenergy orbit detection, e.g. `linspace(-100,100,100)` |
 
 ### Optional parameters
 
 | Parameter       | Default | Description |
 |---|---|---|
+| `calctype`      | `all`   | Stage to run: `bandstructure`, `isoenergy`, `onsager`, or `all` |
+| `inputdata`     | —       | Path to prior stage output file (required for `isoenergy` and `onsager`) |
 | `theta`         | 0       | Twist angle (radians) |
 | `U`             | [0 0]   | Layer potentials [U_top U_bottom] (meV) |
-| `v3`            | 0       | Trigonal warping parameter (eV·A) |
+| `g3` or `v3`    | 0       | Trigonal warping: `g3` in meV (converted via `v3 = g3 * 2.46 / 1000`), or `v3` in eV·A |
 | `isparallel`    | 0       | 1 = use multiprocessing for k-loop |
 | `kT`            | 3       | Thermal broadening for dL/dE (meV) |
 | `Blist`         | —       | Magnetic field values (T) for Onsager quantization, e.g. `linspace(0,12,100)` |
 | `nmax`          | 50      | Maximum Landau level index (used with `Blist`) |
 | `elist_onsager` | `elist` | Separate energy grid (meV) for Onsager step; defaults to `elist` if omitted |
 | `termflags`     | [1 1 1] | Onsager correction terms to include: `[BCflag morbflag chiflag]` (see below) |
+| `susceptibility_datafile` | — | Path to susceptibility `.mat` file (for `onsager` stage with `chiflag=1`) |
 | `outputfile`    | auto    | Output filename; defaults to `electronic_structure_data_{nk1}.mat` |
 
 ### Onsager quantization terms (`termflags`)
@@ -84,15 +109,13 @@ theta = 0
 U = [0 0]
 nk1 = 200
 nk2 = nk1
-nebin = 100
-elist = linspace(-100,100,nebin)
 NQ = 7
 Nlayers = 2
-vF = 5.2657
-gamma1 = 0.34
-v3 = 0
-V0 = 30
-V1 = 21
+g0 = 2140.5
+g1 = 340
+g3 = 0
+v0 = 30
+v1 = 21
 moire_psi = 0.29
 eta = 2e-3
 bands = [-3 -2 -1 0 1 2 3]
@@ -100,10 +123,54 @@ kT = 3
 outputfile = 'results_200.mat'
 
 % Onsager quantization (optional — omit Blist to skip)
+elist = linspace(-100,100,500)
 Blist = linspace(0,12,100)
 nmax = 50
-elist_onsager = linspace(-100,100,500)
 termflags = [1 1 0]
+```
+
+### Staged input files
+
+When running stages separately, each stage only needs its own parameters
+plus `inputdata` pointing to the prior stage's output.
+
+**Stage 1 — bandstructure:**
+```
+calctype = 'bandstructure'
+outputfile = 'bs_nk100.mat'
+isparallel = 1
+theta = 0
+nk1 = 100
+nk2 = nk1
+NQ = 7
+Nlayers = 2
+g0 = 2140.5
+g1 = 340
+g3 = 0
+v0 = 30
+v1 = 21
+moire_psi = 0.29
+eta = 2e-3
+bands = [-3 -2 -1 0 1 2 3]
+```
+
+**Stage 2 — isoenergy:**
+```
+calctype = 'isoenergy'
+inputdata = 'bs_nk100.mat'
+outputfile = 'iso_nk100.mat'
+kT = 3
+elist = linspace(-100,100,500)
+```
+
+**Stage 3 — onsager:**
+```
+calctype = 'onsager'
+inputdata = 'iso_nk100.mat'
+outputfile = 'onsager_result.mat'
+Blist = linspace(0,12,100)
+nmax = 30
+termflags = [0 1 0]
 ```
 
 ## Output file
@@ -122,15 +189,26 @@ Use `.mat` extension for MATLAB-compatible output, `.npz` for numpy.
 | `Oz_Kp`       | (nbands, Nk)        | m^2     | K' valley Berry curvature |
 | `Lz_K`        | (nbands, Nk)        | m^2·meV | K valley orbital moment |
 | `Lz_Kp`       | (nbands, Nk)        | m^2·meV | K' valley orbital moment |
-| `dChi_dE_K`   | (NE,)               | —       | K valley susceptibility (×hbar^4, Ang^-2 → m^-2) |
-| `dChi_dE_Kp`  | (NE,)               | —       | K' valley susceptibility |
 | `kpoints`     | (Nk, 2)             | Ang^-1  | k-point coordinates (kx, ky) |
-| `E_list`      | (NE,)               | eV      | Energy grid for susceptibility |
 | `vol_M`       | scalar               | m^2     | Moire unit cell area |
+| `nk1`         | scalar               | —       | k-mesh dimension (metadata for downstream stages) |
+| `nk2`         | scalar               | —       | k-mesh dimension (metadata for downstream stages) |
 
-Where `nbands = len(bands)`, `Nk = nk1 * nk2`, `NE = nebin`.
+Where `nbands = len(bands)`, `Nk = nk1 * nk2`.
 
-### Onsager output (present when `Blist` is in the input file)
+### Isoenergy output (present when `Blist` is in input, or `calctype = isoenergy`)
+
+| Variable        | Shape                    | Units   | Description |
+|---|---|---|---|
+| `area_K`        | (NE, nbands, max_pockets)| m^-2    | K valley orbit areas |
+| `area_Kp`       | (NE, nbands, max_pockets)| m^-2    | K' valley orbit areas |
+| `enclosedBC_K`  | (NE, nbands, max_pockets)| —       | K valley enclosed Berry curvature |
+| `enclosedBC_Kp` | (NE, nbands, max_pockets)| —       | K' valley enclosed Berry curvature |
+| `dL_dE_K`       | (NE, nbands)             | —       | K valley orbital moment derivative |
+| `dL_dE_Kp`      | (NE, nbands)             | —       | K' valley orbital moment derivative |
+| `E_levels`      | (NE,)                   | meV     | Energy grid used for orbit detection |
+
+### Onsager output (present when `Blist` is in input, or `calctype = onsager`)
 
 | Variable      | Shape               | Units   | Description |
 |---|---|---|---|
@@ -192,6 +270,51 @@ Oz_K = d.Oz_K;        % (nbands x Nk), m^2
 kpoints = d.kpoints;  % (Nk x 2), Ang^-1
 ```
 
+## Fukuyama susceptibility
+
+The susceptibility calculation is a separate standalone program:
+
+```bash
+python susceptibility.py input_chi.txt
+```
+
+### Susceptibility input parameters
+
+| Parameter    | Units | Description |
+|---|---|---|
+| `nk1`, `nk2` | —    | k-mesh dimensions (same as bandstructure) |
+| `NQ`         | —     | Moire Q-vector grid |
+| `Nlayers`    | —     | 1 = monolayer, 2 = bilayer |
+| `vF`         | eV·A  | hbar * v_F |
+| `gamma1`     | eV    | Interlayer coupling |
+| `V0`         | meV   | Moire scalar potential |
+| `V1`         | meV   | Moire vector potential |
+| `moire_psi`  | rad   | Moire coupling phase |
+| `eta`        | eV    | Broadening |
+| `nebin`      | —     | Number of energy bins |
+| `elist`      | meV   | Energy grid, e.g. `linspace(-100,100,nebin)` |
+
+### Susceptibility output
+
+| Variable      | Shape   | Units | Description |
+|---|---|---|---|
+| `dChi_dE_K`   | (NE,)   | —     | K valley susceptibility derivative (×hbar^4, Ang^-2 → m^-2) |
+| `dChi_dE_Kp`  | (NE,)   | —     | K' valley susceptibility derivative |
+| `E_list`      | (NE,)   | eV    | Energy grid |
+
+To include the susceptibility correction in Onsager quantization, set
+`susceptibility_datafile` in the onsager input file and use
+`termflags = [1 1 1]`:
+
+```
+calctype = 'onsager'
+inputdata = 'iso_nk100.mat'
+susceptibility_datafile = 'chi_data.mat'
+termflags = [1 1 1]
+Blist = linspace(0,12,100)
+nmax = 30
+```
+
 ## Hofstadter mode
 
 When `qq > 0` in the input file, the code switches to Hofstadter mode:
@@ -211,7 +334,6 @@ magnetic Bloch bands in a Landau level basis at rational flux qq/pp.
 | `v0`             | meV   | Moire scalar potential |
 | `v1`             | meV   | Moire vector potential |
 | `w`              | meV   | TBG interlayer coupling |
-| `num_bands`      | —     | Number of bands to analyze (centered window) |
 | `nremotebands`   | —     | Remote bands for Kubo sum (default: 300) |
 | `LL_multiplier`  | —     | Controls LL basis truncation (default: 6) |
 | `Nmax`           | —     | Maximum LL cutoff (default: 5000) |
@@ -245,7 +367,6 @@ nk2 = nk1
 LL_multiplier = 6
 gamma = 1
 vF = 1e6
-num_bands = 26
 nremotebands = 300
 nlayers = 2
 bands = [-3 -2 -1 0 1 2 3]
@@ -261,7 +382,9 @@ kpoints, vol_M. No susceptibility (dChi_dE) in Hofstadter mode.
 
 | File | Purpose |
 |---|---|
-| `semiclassical.py` | Core engine: moire Hamiltonian, Berry curvature, orbital moment, susceptibility |
+| `semiclassical.py` | Stage-dispatch driver: load/save, run_bandstructure/isoenergy/onsager |
+| `bandstructure.py` | Band structure engine: moire Hamiltonian, Berry curvature, orbital moment |
+| `susceptibility.py` | Standalone Fukuyama susceptibility (dChi/dE) calculation |
 | `hofstadter_system.py` | Hofstadter H/V setup and per-k-point assembly |
 | `isoenergy.py`      | Grid-based orbit area detection (scipy.ndimage.label) |
 | `onsager.py`        | Onsager quantization: E(B) fan diagram |

@@ -2,16 +2,25 @@
 
 ## Architecture
 
-### Zero-field mode
+### Stage dispatcher
 ```
-semiclassical.py          # core engine (band structure + response functions + Onsager)
+semiclassical.py          # stage-dispatch driver
+  load_data                →  load .mat/.npz with MATLAB dimension handling
+  run_bandstructure        →  calls do_calc, augments with nk1/nk2
+  run_isoenergy            →  calls get_energy_resolved_data for K/Kp
+  run_onsager              →  calls onsager_fan for K/Kp, optionally loads chi
+  __main__                 →  calctype dispatch (bandstructure/isoenergy/onsager/all)
+```
+
+### Band structure engine (zero-field)
+```
+bandstructure.py          # moire Hamiltonian, Berry curvature, orbital moment
   compute_moire_geometry   →  q1, q2, q3, vol_M, vb
   build_qvectors           →  Q (NG×2), NG
   construct_hopping         →  H_hopp_K, H_hopp_Kp  (2NG × 2NG)
   assemble_H_V_K / _Kp     →  H, Vx, Vy  (numwann × numwann)
-  _kpoint_worker            →  per-k eigensolve + Berry curvature + susceptibility
+  _kpoint_worker            →  per-k eigensolve + Berry curvature + orbital moment
   do_calc                   →  orchestrates k-loop, collects results, unit converts
-  __main__                  →  runs do_calc; if Blist in input, runs Onsager pipeline
 ```
 
 ### Hofstadter mode
@@ -21,10 +30,18 @@ hofstadter_system.py      # Hofstadter H/V setup and per-k-point assembly
   assemble_H_V_K            →  H (eV), Vx, Vy (Ang/s) at one k-point (K valley)
   assemble_H_V_Kp           →  H (eV), Vx, Vy (Ang/s) at one k-point (K' valley)
 
-semiclassical.py          # mode branching
+bandstructure.py          # mode branching
   _kpoint_worker_hofstadter →  per-k eigensolve + Berry curvature (no susceptibility)
   _do_calc_hofstadter       →  orchestrates Hofstadter k-loop
   do_calc                   →  branches on qq: if qq>0 → Hofstadter, else → zero-field
+```
+
+### Susceptibility (standalone)
+```
+susceptibility.py         # standalone Fukuyama susceptibility executable
+  _chi_worker              →  per-k-point chi calculation
+  do_calc_chi              →  orchestrates chi k-loop
+  __main__                 →  runs do_calc_chi, saves dChi_dE_K/Kp
 ```
 
 ### Shared modules
@@ -158,6 +175,10 @@ only meaningful when bands are isolated by gaps larger than eta.
 
 ## Susceptibility (Fukuyama formula)
 
+Implemented as a standalone executable in `susceptibility.py`, separate
+from the band structure pipeline. Imports geometry and H/V assembly
+functions from `bandstructure.py`.
+
 ```
 G_nm(E) = delta_nm / (E - E_n + i*eta)
 chi(E) = (1/Nk*vol_M) * Im Tr[ Vx*G * Vy*G * Vx*G * Vy*G ]
@@ -168,7 +189,13 @@ Implemented as `(vx .* g_row) @ (vy .* g_row) @ ...` where
 
 Energy argument is in meV (elist), eigenvalues converted from eV via ×1e3.
 
+Output: `dChi_dE_K`, `dChi_dE_Kp`, `E_list`. To include chi in Onsager
+quantization, set `susceptibility_datafile` in the onsager input and use
+`termflags = [1 1 1]`.
+
 ## Unit conversions (post-processing)
+
+### Band structure output (bandstructure.py)
 
 | Quantity | Internal units | Output units | Conversion |
 |---|---|---|---|
@@ -176,6 +203,11 @@ Energy argument is in meV (elist), eigenvalues converted from eV via ×1e3.
 | Oz | Ang^2 | m^2 | ×1e-20 |
 | Lz | eV·Ang^2 | meV·m^2 | ×1e-20 × 1e3 |
 | vol_M | Ang^2 | m^2 | ×1e-20 |
+
+### Susceptibility output (susceptibility.py)
+
+| Quantity | Internal units | Output units | Conversion |
+|---|---|---|---|
 | dChi_dE | Ang^-2 / ... | m^-2 / ... | ×1e-20 × hbar^4 |
 | E_list | meV (input) | eV | ÷1e3 |
 
@@ -219,25 +251,31 @@ Python equivalent: `dim // 2 - 1` → 97 (0-indexed)
 
 Band selection: `bands_idx = dim // 2 - 1 + bands_sel`
 
-## Integrated Onsager pipeline
+## Stage-based Onsager pipeline
 
-When `Blist` is present in the input file, `__main__` runs the full
-pipeline after `do_calc`:
+The calculation is split into three independently runnable stages,
+dispatched by `calctype` in the input file:
 
-1. `get_energy_resolved_data` — orbit areas, enclosed Berry curvature,
-   dL/dE for each valley
-2. `onsager_fan` — solves the quantization condition for each band
-3. Results saved valley-resolved as `LL_K_band{i}` and `LL_Kp_band{i}`
+```
+bandstructure  →  isoenergy  →  onsager
+    (k-mesh)      (orbit areas)   (LL fan)
+```
+
+When `calctype = all` (default) and `Blist` is present, all three stages
+run end-to-end. Each stage can also run separately by setting `calctype`
+and providing prior results via `inputdata`.
+
+1. `run_bandstructure` — calls `do_calc`, saves E_K, Oz_K, Lz_K, kpoints, vol_M
+2. `run_isoenergy` — calls `get_energy_resolved_data` for K/Kp, saves
+   orbit areas, enclosed BC, dL/dE
+3. `run_onsager` — calls `onsager_fan` for K/Kp, optionally loads
+   susceptibility data from `susceptibility_datafile`
 
 The Onsager step uses its own energy grid (`elist_onsager`, defaults to
-`elist`) so it can be denser than the susceptibility grid without
-increasing susceptibility cost.
+`elist`) so it can be denser than needed for other purposes.
 
 Output keys: `Blist` (nB,), `nmax` (scalar), `LL_K_band{i}` (nB, nmax+1)
 and `LL_Kp_band{i}` (nB, nmax+1) for each band with orbits.
-
-The `include_chi` input flag (default 1) controls whether the expensive
-Fukuyama susceptibility energy loop runs. Set to 0 to skip it.
 
 ## Hofstadter mode internals
 

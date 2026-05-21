@@ -44,7 +44,10 @@ on hBN.  Three calculation modes:
 
 | File | Purpose |
 |---|---|
-| `semiclassical.py` | Core engine: BZ k-mesh, Berry curvature, orbital moment, susceptibility, Onsager pipeline |
+| `semiclassical.py` | Stage-dispatch driver: load/save data, run bandstructure/isoenergy/onsager stages |
+| `bandstructure.py` | Band structure engine: moire Hamiltonian, Berry curvature, orbital moment |
+| `susceptibility.py` | Standalone Fukuyama susceptibility (dChi/dE) calculation |
+| `hofstadter_system.py` | Hofstadter H/V setup and per-k-point assembly |
 | `isoenergy.py` | Contour-based isoenergy orbit detection (marching squares + shoelace area) |
 | `onsager.py` | Onsager quantization solver: S(E)/(2π)² + corrections = B(n+½)/φ₀ |
 | `input.txt` | Example input with Onsager parameters |
