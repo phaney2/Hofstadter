@@ -168,9 +168,13 @@ def _onsager_bfield_worker(args):
     kweight = (2 * np.pi)**2 / (Nk * vol_M)
     termflags_3 = (int(termflags[0]), 0, int(termflags[1]))
 
+    hbar = 1.054571817e-34       # J * s
+    e_charge = 1.602176634e-19   # C
+    Lz_prefactor = e_charge / (2 * hbar)  # 1/m^2 when multiplied by B [T]
+
     band_results = {}
     for n in range(nbands):
-        E_mod = E_bands[n] + gfactor * B * Lz_bands[n]
+        E_mod = E_bands[n] + gfactor * B * Lz_prefactor * Lz_bands[n]
         E_levels = np.linspace(E_mod.min(), E_mod.max(), nE)
 
         A, K = isoenergy_areas(E_mod, E_levels, vol_M, nk1, nk2)
@@ -206,6 +210,9 @@ def run_onsager_bfield(inp, bs_data):
     nE = int(inp['nE'])
     gfactor = float(inp.get('gfactor', 1.0))
     isparallel = int(inp.get('isparallel', 0))
+    nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
+    if nprocs is not None:
+        nprocs = int(nprocs)
 
     termflags_raw = np.atleast_1d(
         inp.get('termflags', np.array([1, 0]))).astype(int)
@@ -236,10 +243,18 @@ def run_onsager_bfield(inp, bs_data):
 
         if isparallel:
             import multiprocessing
-            with multiprocessing.Pool() as pool:
-                all_results = pool.map(_onsager_bfield_worker, args_list)
+            all_results = []
+            with multiprocessing.Pool(nprocs) as pool:
+                for i, r in enumerate(pool.imap(_onsager_bfield_worker, args_list)):
+                    all_results.append(r)
+                    print(f"\r  {valley}: {100*(i+1)//nB}%", end="", flush=True)
+            print()
         else:
-            all_results = [_onsager_bfield_worker(a) for a in args_list]
+            all_results = []
+            for i, a in enumerate(args_list):
+                all_results.append(_onsager_bfield_worker(a))
+                print(f"\r  {valley}: {100*(i+1)//nB}%", end="", flush=True)
+            print()
 
         for n in range(nbands):
             max_pock = max(all_results[iB][n]['area'].shape[1]

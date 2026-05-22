@@ -102,6 +102,9 @@ def do_calc_chi(filepath):
     psi      = float(inp['moire_psi'])
     eta      = float(inp['eta'])
     ispar    = int(inp.get('isparallel', 0))
+    nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
+    if nprocs is not None:
+        nprocs = int(nprocs)
     U        = np.atleast_1d(inp.get('U', np.array([0, 0])))
     elist_meV = np.atleast_1d(inp['elist']).ravel()
 
@@ -153,7 +156,7 @@ def do_calc_chi(filepath):
 
     print(f"  Calculating susceptibility over {Nk_tot} k-points...")
     if ispar:
-        with Pool() as pool:
+        with Pool(nprocs) as pool:
             results = list(pool.imap_unordered(_chi_worker, args_list))
     else:
         results = [_chi_worker(a) for a in args_list]

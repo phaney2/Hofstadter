@@ -331,6 +331,9 @@ def _do_calc_hofstadter(inp):
     hbar = 6.582119569e-16       # eV * s
     eta = float(inp.get('eta', 1))
     ispar = int(inp.get('isparallel', 0))
+    nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
+    if nprocs is not None:
+        nprocs = int(nprocs)
     bands_sel = np.atleast_1d(inp['bands']).astype(int)
 
     target_idx = setup['target_idx']
@@ -346,7 +349,7 @@ def _do_calc_hofstadter(inp):
 
     print(f"  Calculating over {Nk_tot} k-points...")
     if ispar:
-        with Pool(initializer=_init_hofstadter_worker,
+        with Pool(nprocs, initializer=_init_hofstadter_worker,
                   initargs=(setup,)) as pool:
             results = list(pool.imap_unordered(_kpoint_worker_hofstadter, args_list))
     else:
@@ -440,6 +443,9 @@ def do_calc(filepath):
     psi      = float(inp['moire_psi'])
     eta      = float(inp['eta'])
     ispar    = int(inp.get('isparallel', 0))
+    nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
+    if nprocs is not None:
+        nprocs = int(nprocs)
     U        = np.atleast_1d(inp.get('U', np.array([0, 0])))
     bands_sel = np.atleast_1d(inp['bands']).astype(int)
 
@@ -495,7 +501,7 @@ def do_calc(filepath):
     # --- Run k-loop ---
     print(f"  Calculating over {Nk_tot} k-points...")
     if ispar:
-        with Pool() as pool:
+        with Pool(nprocs) as pool:
             results = list(pool.imap_unordered(_kpoint_worker, args_list))
     else:
         results = [_kpoint_worker(a) for a in args_list]
