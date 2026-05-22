@@ -156,12 +156,27 @@ def run_onsager(inp, iso_data):
     return result
 
 
+_onsager_bfield_shared = {}
+
+
+def _init_onsager_bfield_worker(shared):
+    global _onsager_bfield_shared
+    _onsager_bfield_shared = shared
+
+
 def _onsager_bfield_worker(args):
     from isoenergy import isoenergy_areas
     from onsager import onsager_fan_band
 
-    (B, E_bands, Lz_bands, Oz_bands,
-     vol_M, nk1, nk2, nE, nmax, gfactor, termflags) = args
+    B, nE, nmax, gfactor, termflags = args
+    shared = _onsager_bfield_shared
+
+    E_bands = shared['E_bands']
+    Lz_bands = shared['Lz_bands']
+    Oz_bands = shared['Oz_bands']
+    vol_M = shared['vol_M']
+    nk1 = shared['nk1']
+    nk2 = shared['nk2']
 
     nbands = E_bands.shape[0]
     Nk = nk1 * nk2
@@ -231,25 +246,28 @@ def run_onsager_bfield(inp, bs_data):
               'nbands': nbands, 'gfactor': gfactor}
 
     for valley in ('K', 'Kp'):
-        E_v = bs_data[f'E_{valley}']
-        Lz_v = bs_data[f'Lz_{valley}']
-        Oz_v = bs_data[f'Oz_{valley}']
+        shared = {
+            'E_bands': bs_data[f'E_{valley}'],
+            'Lz_bands': bs_data[f'Lz_{valley}'],
+            'Oz_bands': bs_data[f'Oz_{valley}'],
+            'vol_M': vol_M, 'nk1': nk1, 'nk2': nk2,
+        }
 
-        args_list = [
-            (B, E_v, Lz_v, Oz_v, vol_M, nk1, nk2,
-             nE, nmax, gfactor, termflags)
-            for B in Blist
-        ]
+        args_list = [(B, nE, nmax, gfactor, termflags) for B in Blist]
 
         if isparallel:
             import multiprocessing
             all_results = []
-            with multiprocessing.Pool(nprocs) as pool:
+            with multiprocessing.Pool(
+                    nprocs, initializer=_init_onsager_bfield_worker,
+                    initargs=(shared,)) as pool:
                 for i, r in enumerate(pool.imap(_onsager_bfield_worker, args_list)):
                     all_results.append(r)
                     print(f"\r  {valley}: {100*(i+1)//nB}%", end="", flush=True)
             print()
         else:
+            global _onsager_bfield_shared
+            _onsager_bfield_shared = shared
             all_results = []
             for i, a in enumerate(args_list):
                 all_results.append(_onsager_bfield_worker(a))
