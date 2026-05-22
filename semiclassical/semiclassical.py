@@ -313,8 +313,9 @@ def run_onsager_bfield(inp, bs_data):
 # Main
 # ---------------------------------------------------------------------------
 
-if __name__ == '__main__':
-    fpath = sys.argv[1] if len(sys.argv) > 1 else 'input_benchmark.txt'
+def main(fpath=None):
+    if fpath is None:
+        fpath = sys.argv[1] if len(sys.argv) > 1 else 'input_benchmark.txt'
     inp = parse_input_file(fpath)
 
     calctype = str(inp.get('calctype', 'all')).lower()
@@ -345,7 +346,17 @@ if __name__ == '__main__':
         bs_data = load_data(inp['inputdata'])
         result = run_onsager_bfield(inp, bs_data)
         outfile = inp.get('outputfile', 'onsager_bfield_data.mat')
-        save_result(result, outfile)
+
+        detail_keys = {k for k in result
+                       if k.startswith(('area_', 'enclosedBC_', 'E_levels_'))}
+        fan_result = {k: v for k, v in result.items() if k not in detail_keys}
+        save_result(fan_result, outfile)
+
+        if detail_keys:
+            detail_result = {k: result[k] for k in detail_keys}
+            detail_result['Blist'] = result['Blist']
+            base, ext = os.path.splitext(outfile)
+            save_result(detail_result, f'{base}_detail{ext}')
 
     elif calctype == 'all':
         print("=== Running all stages ===")
@@ -368,3 +379,7 @@ if __name__ == '__main__':
         raise ValueError(
             f"Unknown calctype: {calctype!r}. "
             f"Choose from: bandstructure, isoenergy, onsager, onsager_bfield, all")
+
+
+if __name__ == '__main__':
+    main()
