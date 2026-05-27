@@ -197,7 +197,7 @@ def build_hofstadter_setup(inp):
     n11 = n1grid.flatten(order='F')
     n22 = n2grid.flatten(order='F')
 
-    vb = np.array([b1 / pp / 2, b2 / pp])
+    vb = np.array([b1 / pp, b2 / pp])
     kpoints = np.zeros((Nk_tot, 2))
     for j in range(Nk_tot):
         frac = np.array([n11[j] / nk1, n22[j] / nk2])
@@ -205,7 +205,7 @@ def build_hofstadter_setup(inp):
 
     kpoints_Ang = kpoints * (1.0 / m_to_Ang)
     M_mag_Ang = M_mag * (1.0 / m_to_Ang)
-    vol_M = 2 * pp**2 * uc_area
+    vol_M = pp**2 * uc_area / 2
 
     # --- Band indexing ---
     idx_c = dim_total // 2

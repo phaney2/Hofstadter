@@ -372,7 +372,7 @@ magnetic Bloch bands in a Landau level basis at rational flux qq/pp.
 
 | Parameter        | Units | Description |
 |---|---|---|
-| `qq`             | —     | Numerator of flux ratio qq/pp (flux quanta per moire cell) |
+| `qq`             | —     | Numerator of flux ratio qq/pp (flux quanta per **doubled** moire cell; flux per primitive cell is qq/(2pp)) |
 | `pp`             | —     | Denominator of flux ratio qq/pp |
 | `g0`             | meV   | Dirac velocity parameter |
 | `g1`             | meV   | Interlayer coupling |

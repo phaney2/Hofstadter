@@ -151,23 +151,24 @@ The Berry connection matrices (`Ax`, `Ay`) are still computed and stored
 in the setup dict because they may be needed for the orbital moment `Lz`
 (where the physical velocity enters). This needs verification.
 
+### Hofstadter mode — magnetic flux convention
+
+The magnetic field is defined as `B = (qq/pp) × φ₀ / uc_area` where
+`uc_area = √3 L² = 2 A_prim` is the **doubled** (rectangular) unit cell.
+This means the flux per **primitive** (triangular) moire cell is
+`qq/(2pp) × φ₀`, not `qq/pp × φ₀`. To get one flux quantum per primitive
+cell, use `qq/pp = 2` (e.g. qq=2, pp=1).
+
 ### Hofstadter mode — BZ normalization for Chern numbers
 
-The k-mesh vectors are `vb = [b1/(2*pp), b2/pp]` where b1, b2 are the
-moire reciprocal lattice vectors. This covers a k-space area that is
-1/(2*pp²) of the moire BZ. The relationship between this mesh area and
-the magnetic Brillouin zone is:
+The k-mesh vectors are `vb = [b1/pp, b2/pp]` where b1, b2 are the
+primitive moire reciprocal lattice vectors. This covers a k-space area
+that is `1/pp²` of the moire BZ. The half-chain convention (Nq = qq)
+uses a doubled real-space unit cell with chain phase factors doubled
+to compensate.
 
-- The MBZ is reduced by 1/pp along one direction (magnetic translation
-  symmetry: pp moire cells per magnetic unit cell).
-- The chain doubling (Nq = 2*qq) further halves the BZ in one direction.
-- Bands make pp oscillations along the full moire BZ.
-
-The correct BZ area for the Chern number integral `C = A_BZ/(2π·Nk) Σ Ω`
-must use the area matching the k-mesh domain. The relationship between
-`vol_M` (real-space area) and the k-mesh area is still under validation.
-Current `vol_M = pp × uc_area` gives `(2π)²/vol_M` that is 2*pp times
-larger than the actual k-mesh area.
+The real-space area for BZ normalization is `vol_M = pp² × uc_area / 2
+= pp² × A_prim`, giving `BZ_area = (2π)² / vol_M = (2π)² / (pp² A_prim)`.
 
 For Chern numbers: only the total Chern of a set of bands between two
 well-defined energy gaps is quantized. Individual band Chern numbers are
