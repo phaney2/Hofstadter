@@ -18,9 +18,9 @@ def _build_chain_matrices_K(Nq, pp, qq):
         tqindm1 = (qcounter - 1) % Nq
         tqval = qcounter % Nq
 
-        chain1[tqind, tqind] += np.exp(1j * 2 * np.pi * pp / qq * tqval)
-        chain2[tqindm1, tqind] += np.exp(-1j * (np.pi / 2) * pp / qq * (2 * tqval - 1))
-        chain3[tqindp1, tqind] += np.exp(-1j * (np.pi / 2) * pp / qq * (2 * tqval + 1))
+        chain1[tqind, tqind] += np.exp(1j * 4 * np.pi * pp / qq * tqval)
+        chain2[tqindm1, tqind] += np.exp(-1j * (np.pi) * pp / qq * (2 * tqval - 1))
+        chain3[tqindp1, tqind] += np.exp(-1j * (np.pi) * pp / qq * (2 * tqval + 1))
 
         chainlabels.append(f"q{qcounter}")
     return chain1, chain2, chain3, chainlabels
@@ -39,9 +39,9 @@ def _build_chain_matrices_Kp(Nq, pp, qq):
         tqindm1 = (qcounter - 1) % Nq
         tqval = qcounter % Nq
 
-        chain1[tqind, tqind] += np.exp(-1j * 2 * np.pi * pp / qq * tqval)
-        chain2[tqindp1, tqind] += np.exp(1j * (np.pi / 2) * pp / qq * (2 * tqval + 1))
-        chain3[tqindm1, tqind] += np.exp(1j * (np.pi / 2) * pp / qq * (2 * tqval - 1))
+        chain1[tqind, tqind] += np.exp(-1j * 4 * np.pi * pp / qq * tqval)
+        chain2[tqindp1, tqind] += np.exp(1j * (np.pi) * pp / qq * (2 * tqval + 1))
+        chain3[tqindm1, tqind] += np.exp(1j * (np.pi) * pp / qq * (2 * tqval - 1))
 
         chainlabels.append(f"q{qcounter}")
     return chain1, chain2, chain3, chainlabels

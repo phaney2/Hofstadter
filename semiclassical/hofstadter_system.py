@@ -75,7 +75,7 @@ def build_hofstadter_setup(inp):
     L_moire = ((1 + eps) * A_GRAPHENE
                / np.sqrt(eps**2 + 2 * (1 + eps) * (1 - np.cos(theta))))
     ktheta = 4 * np.pi / (3**0.5 * L_moire)
-    uc_area = 3**0.5 * L_moire**2 / 2
+    uc_area = 3**0.5 * L_moire**2 / 2 * 2
 
     phi_0 = HBAR * 2 * np.pi / Q_E
     B = (qq / pp) * phi_0 / uc_area
@@ -98,7 +98,7 @@ def build_hofstadter_setup(inp):
         'delta': delta / 1e3 * Q_E,
     }
 
-    Nq = 2 * qq
+    Nq = 1 * qq
     Lx = L_moire
     Ly = np.sqrt(3) * L_moire / 2
 

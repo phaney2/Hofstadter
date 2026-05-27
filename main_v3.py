@@ -1,7 +1,7 @@
 """
 Magnetic Bloch bands for mono/bilayer graphene on hBN substrate.
 
-Uses doubled guiding-center chain (Nq = 2*qq) and corrected moire
+Uses half-chain (Nq = qq) with doubled unit cell, and corrected moire
 coupling matrices (order=[3,1,2], conj=1, psiconj=1).
 
 Reference: "A Quantum Ruler for Orbital Magnetism in Moire Quantum Matter"
@@ -142,7 +142,7 @@ def do_calc(filepath):
     L_moire = (1 + eps) * A_GRAPHENE / np.sqrt(eps ** 2 + 2 * (1 + eps) * (1 - np.cos(theta)))
 
     ktheta = 4 * np.pi / (3 ** 0.5 * L_moire)
-    uc_area = 3 ** 0.5 * L_moire ** 2 / 2
+    uc_area = 3 ** 0.5 * L_moire ** 2 / 2 * 2
 
     phi_0 = HBAR * 2 * np.pi / Q_E
     B = (qq / pp) * phi_0 / uc_area
@@ -166,7 +166,7 @@ def do_calc(filepath):
         'delta': delta / 1e3 * Q_E,
     }
 
-    Nq = 2 * qq
+    Nq = 1 * qq
 
     Lx = L_moire
     Ly = np.sqrt(3) * L_moire / 2
@@ -277,7 +277,7 @@ def do_calc(filepath):
 
     print(" Entering the k loop")
     if isparallel:
-        nworkers = min(cpu_count(), Nk_tot)
+        nworkers = min(int(d.get('nworkers', cpu_count())), Nk_tot)
         print(f"  (parallel: {nworkers} workers)")
         tasks = [(kc, kpoints[kc, :]) for kc in range(Nk_tot)]
         with Pool(processes=nworkers,
