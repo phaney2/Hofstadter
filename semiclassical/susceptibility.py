@@ -79,6 +79,46 @@ def _chi_worker(args):
 
 
 # ---------------------------------------------------------------------------
+# Energy grid construction
+# ---------------------------------------------------------------------------
+
+def _build_elist(E_valley, nE):
+    """Build an energy grid covering only intervals with states.
+
+    Collects per-band [min, max] ranges, merges overlapping intervals,
+    and distributes nE points across the occupied intervals proportional
+    to their width.
+    """
+    nbands = E_valley.shape[0]
+    intervals = []
+    for n in range(nbands):
+        intervals.append((E_valley[n].min(), E_valley[n].max()))
+
+    intervals.sort()
+    merged = [intervals[0]]
+    for lo, hi in intervals[1:]:
+        if lo <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+
+    widths = [hi - lo for lo, hi in merged]
+    total_width = sum(widths)
+
+    elist_parts = []
+    points_left = nE
+    for i, (lo, hi) in enumerate(merged):
+        if i < len(merged) - 1:
+            ni = max(2, round(nE * widths[i] / total_width))
+        else:
+            ni = points_left
+        elist_parts.append(np.linspace(lo, hi, ni))
+        points_left -= ni
+
+    return np.concatenate(elist_parts), merged
+
+
+# ---------------------------------------------------------------------------
 # Hofstadter susceptibility (qq > 0)
 # ---------------------------------------------------------------------------
 
@@ -134,17 +174,14 @@ def _chi_worker_hofstadter(args):
 
 
 def _do_calc_chi_hofstadter(inp):
-    from semiclassical import load_data
-
     setup = build_hofstadter_setup(inp)
 
     hbar = 6.582119569e-16       # eV * s
-    eta = float(inp.get('eta', 1))
+    eta = float(inp.get('eta', 1)) * 1e3
     ispar = int(inp.get('isparallel', 0))
     nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
     if nprocs is not None:
         nprocs = int(nprocs)
-    nE = int(inp['nE'])
 
     remote_ind = setup['remote_ind']
     nk1 = setup['nk1']
@@ -154,63 +191,66 @@ def _do_calc_chi_hofstadter(inp):
     vol_M = setup['vol_M']
     weight_factor = 1.0 / (Nk_tot * vol_M)
 
-    bs_data = load_data(inp['inputdata'])
-    nbands = bs_data['E_K'].shape[0]
+    if 'inputdata' in inp:
+        from semiclassical import load_data
+        nE = int(inp['nE'])
+        bs_data = load_data(inp['inputdata'])
+        elist_K, merged_K = _build_elist(bs_data['E_K'], nE)
+        elist_Kp, merged_Kp = _build_elist(bs_data['E_Kp'], nE)
 
-    print(f"  Susceptibility: nE={nE} per band, {nbands} bands")
+        print(f"  Susceptibility: nE={nE}")
+        print(f"    K:  {len(merged_K)} interval(s), {len(elist_K)} points")
+        for lo, hi in merged_K:
+            print(f"        [{lo:.2f}, {hi:.2f}] meV")
+        print(f"    Kp: {len(merged_Kp)} interval(s), {len(elist_Kp)} points")
+        for lo, hi in merged_Kp:
+            print(f"        [{lo:.2f}, {hi:.2f}] meV")
+    else:
+        elist_meV = np.atleast_1d(inp['elist']).ravel()
+        elist_K = elist_meV
+        elist_Kp = elist_meV
+        print(f"  Susceptibility: {len(elist_meV)} energy points "
+              f"[{elist_meV[0]:.2f}, {elist_meV[-1]:.2f}] meV")
 
-    result = {'nbands': nbands}
+    args_list = [(kc, kpoints[kc], remote_ind, eta,
+                   elist_K, elist_Kp, weight_factor)
+                 for kc in range(Nk_tot)]
 
-    for n in range(nbands):
-        for valley in ('K', 'Kp'):
-            emin = bs_data[f'E_{valley}'][n].min()
-            emax = bs_data[f'E_{valley}'][n].max()
-            elist_meV = np.linspace(emin, emax, nE)
-            print(f"    band {n} {valley}: E = [{emin:.2f}, {emax:.2f}] meV")
-
-            if valley == 'K':
-                elist_K = elist_meV
-            else:
-                elist_Kp = elist_meV
-
-        args_list = [(kc, kpoints[kc], remote_ind, eta,
-                       elist_K, elist_Kp, weight_factor)
-                     for kc in range(Nk_tot)]
-
-        print(f"    band {n}: computing over {Nk_tot} k-points...")
-        if ispar:
-            results = []
-            with Pool(nprocs, initializer=_init_chi_hofstadter_worker,
-                      initargs=(setup,)) as pool:
-                for i, r in enumerate(pool.imap_unordered(
-                        _chi_worker_hofstadter, args_list)):
-                    results.append(r)
-                    if (i + 1) % max(1, Nk_tot // 20) == 0 or i + 1 == Nk_tot:
-                        print(f"\r    {100*(i+1)//Nk_tot}%", end="", flush=True)
-            print()
-        else:
-            global _chi_hofstadter_shared
-            _chi_hofstadter_shared = setup
-            results = []
-            for i, a in enumerate(args_list):
-                results.append(_chi_worker_hofstadter(a))
+    print(f"  Computing over {Nk_tot} k-points...")
+    if ispar:
+        results = []
+        with Pool(nprocs, initializer=_init_chi_hofstadter_worker,
+                  initargs=(setup,)) as pool:
+            for i, r in enumerate(pool.imap_unordered(
+                    _chi_worker_hofstadter, args_list)):
+                results.append(r)
                 if (i + 1) % max(1, Nk_tot // 20) == 0 or i + 1 == Nk_tot:
-                    print(f"\r    {100*(i+1)//Nk_tot}%", end="", flush=True)
-            print()
+                    print(f"\r  {100*(i+1)//Nk_tot}%", end="", flush=True)
+        print()
+    else:
+        global _chi_hofstadter_shared
+        _chi_hofstadter_shared = setup
+        results = []
+        for i, a in enumerate(args_list):
+            results.append(_chi_worker_hofstadter(a))
+            if (i + 1) % max(1, Nk_tot // 20) == 0 or i + 1 == Nk_tot:
+                print(f"\r  {100*(i+1)//Nk_tot}%", end="", flush=True)
+        print()
 
-        dChi_K = np.zeros(len(elist_K))
-        dChi_Kp = np.zeros(len(elist_Kp))
-        for chi_K, chi_Kp in results:
-            dChi_K += chi_K
-            dChi_Kp += chi_Kp
-
-        result[f'E_levels_K_band{n}'] = elist_K / 1000
-        result[f'E_levels_Kp_band{n}'] = elist_Kp / 1000
-        result[f'dChi_dE_K_band{n}'] = dChi_K * hbar**4
-        result[f'dChi_dE_Kp_band{n}'] = dChi_Kp * hbar**4
+    dChi_K = np.zeros(len(elist_K))
+    dChi_Kp = np.zeros(len(elist_Kp))
+    for chi_K, chi_Kp in results:
+        dChi_K += chi_K
+        dChi_Kp += chi_Kp
 
     print("  Done.")
-    return result
+
+    return {
+        'E_list_K': elist_K / 1000,
+        'E_list_Kp': elist_Kp / 1000,
+        'dChi_dE_K': dChi_K * hbar**4,
+        'dChi_dE_Kp': dChi_Kp * hbar**4,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -218,8 +258,6 @@ def _do_calc_chi_hofstadter(inp):
 # ---------------------------------------------------------------------------
 
 def do_calc_chi(filepath):
-    from semiclassical import load_data
-
     inp = parse_input_file(filepath)
 
     qq = int(inp.get('qq', 0))
@@ -246,13 +284,12 @@ def do_calc_chi(filepath):
     V0_meV   = float(inp.get('v0', inp.get('V0')))
     V1_meV   = float(inp.get('v1', inp.get('V1')))
     psi      = float(inp.get('moire_psi', 0.29))
-    eta      = float(inp['eta'])
+    eta      = float(inp['eta']) * 1e3
     ispar    = int(inp.get('isparallel', 0))
     nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
     if nprocs is not None:
         nprocs = int(nprocs)
     U        = np.atleast_1d(inp.get('U', np.array([0, 0])))
-    nE       = int(inp['nE'])
 
     hbar = 6.582119569e-16       # eV * s
 
@@ -294,68 +331,73 @@ def do_calc_chi(filepath):
 
     weight_factor = 1.0 / (Nk_tot * vol_M)
 
-    bs_data = load_data(inp['inputdata'])
-    nbands = bs_data['E_K'].shape[0]
+    if 'inputdata' in inp:
+        from semiclassical import load_data
+        nE = int(inp['nE'])
+        bs_data = load_data(inp['inputdata'])
+        elist_K, merged_K = _build_elist(bs_data['E_K'], nE)
+        elist_Kp, merged_Kp = _build_elist(bs_data['E_Kp'], nE)
 
-    print(f"  Susceptibility: nE={nE} per band, {nbands} bands")
+        print(f"  Susceptibility: nE={nE}")
+        print(f"    K:  {len(merged_K)} interval(s), {len(elist_K)} points")
+        for lo, hi in merged_K:
+            print(f"        [{lo:.2f}, {hi:.2f}] meV")
+        print(f"    Kp: {len(merged_Kp)} interval(s), {len(elist_Kp)} points")
+        for lo, hi in merged_Kp:
+            print(f"        [{lo:.2f}, {hi:.2f}] meV")
+    else:
+        elist_meV = np.atleast_1d(inp['elist']).ravel()
+        elist_K = elist_meV
+        elist_Kp = elist_meV
+        print(f"  Susceptibility: {len(elist_meV)} energy points "
+              f"[{elist_meV[0]:.2f}, {elist_meV[-1]:.2f}] meV")
 
-    result = {'nbands': nbands}
+    common = (Q, NG, vF, gamma1_ev, v3, Utp, Ubm,
+              H_hopp_K, H_hopp_Kp, hbar, nlayers,
+              remote_ind, eta, elist_K, elist_Kp, weight_factor)
+    args_list = [(kpoints[kc], *common) for kc in range(Nk_tot)]
 
-    for n in range(nbands):
-        for valley in ('K', 'Kp'):
-            emin = bs_data[f'E_{valley}'][n].min()
-            emax = bs_data[f'E_{valley}'][n].max()
-            elist_meV = np.linspace(emin, emax, nE)
-            print(f"    band {n} {valley}: E = [{emin:.2f}, {emax:.2f}] meV")
-
-            if valley == 'K':
-                elist_K = elist_meV
-            else:
-                elist_Kp = elist_meV
-
-        common = (Q, NG, vF, gamma1_ev, v3, Utp, Ubm,
-                  H_hopp_K, H_hopp_Kp, hbar, nlayers,
-                  remote_ind, eta, elist_K, elist_Kp, weight_factor)
-        args_list = [(kpoints[kc], *common) for kc in range(Nk_tot)]
-
-        print(f"    band {n}: computing over {Nk_tot} k-points...")
-        if ispar:
-            results = []
-            with Pool(nprocs) as pool:
-                for i, r in enumerate(pool.imap_unordered(_chi_worker, args_list)):
-                    results.append(r)
-                    if (i + 1) % max(1, Nk_tot // 20) == 0 or i + 1 == Nk_tot:
-                        print(f"\r    {100*(i+1)//Nk_tot}%", end="", flush=True)
-            print()
-        else:
-            results = []
-            for i, a in enumerate(args_list):
-                results.append(_chi_worker(a))
+    print(f"  Computing over {Nk_tot} k-points...")
+    if ispar:
+        results = []
+        with Pool(nprocs) as pool:
+            for i, r in enumerate(pool.imap_unordered(_chi_worker, args_list)):
+                results.append(r)
                 if (i + 1) % max(1, Nk_tot // 20) == 0 or i + 1 == Nk_tot:
-                    print(f"\r    {100*(i+1)//Nk_tot}%", end="", flush=True)
-            print()
+                    print(f"\r  {100*(i+1)//Nk_tot}%", end="", flush=True)
+        print()
+    else:
+        results = []
+        for i, a in enumerate(args_list):
+            results.append(_chi_worker(a))
+            if (i + 1) % max(1, Nk_tot // 20) == 0 or i + 1 == Nk_tot:
+                print(f"\r  {100*(i+1)//Nk_tot}%", end="", flush=True)
+        print()
 
-        dChi_K = np.zeros(len(elist_K))
-        dChi_Kp = np.zeros(len(elist_Kp))
-        for chi_K, chi_Kp in results:
-            dChi_K += chi_K
-            dChi_Kp += chi_Kp
-
-        result[f'E_levels_K_band{n}'] = elist_K / 1000
-        result[f'E_levels_Kp_band{n}'] = elist_Kp / 1000
-        result[f'dChi_dE_K_band{n}'] = dChi_K * 1e-20 * hbar**4
-        result[f'dChi_dE_Kp_band{n}'] = dChi_Kp * 1e-20 * hbar**4
+    dChi_K = np.zeros(len(elist_K))
+    dChi_Kp = np.zeros(len(elist_Kp))
+    for chi_K, chi_Kp in results:
+        dChi_K += chi_K
+        dChi_Kp += chi_Kp
 
     print("  Done.")
-    return result
+
+    return {
+        'E_list_K': elist_K / 1000,
+        'E_list_Kp': elist_Kp / 1000,
+        'dChi_dE_K': dChi_K * 1e-20 * hbar**4,
+        'dChi_dE_Kp': dChi_Kp * 1e-20 * hbar**4,
+    }
 
 
 # ---------------------------------------------------------------------------
-# Standalone driver
+# Main
 # ---------------------------------------------------------------------------
 
-if __name__ == '__main__':
-    fpath = sys.argv[1] if len(sys.argv) > 1 else 'input_chi.txt'
+def main(fpath=None):
+    if fpath is None:
+        fpath = sys.argv[1] if len(sys.argv) > 1 else 'input_chi.txt'
+
     result = do_calc_chi(fpath)
 
     inp = parse_input_file(fpath)
@@ -368,3 +410,7 @@ if __name__ == '__main__':
         np.savez(outfile, **result)
 
     print(f"  Saved to {outfile}")
+
+
+if __name__ == '__main__':
+    main()

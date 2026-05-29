@@ -333,27 +333,44 @@ python susceptibility.py input_chi.txt
 
 ### Susceptibility input parameters
 
-| Parameter    | Units | Description |
-|---|---|---|
-| `nk1`, `nk2` | —    | k-mesh dimensions (same as bandstructure) |
-| `NQ`         | —     | Moire Q-vector grid |
-| `Nlayers`    | —     | 1 = monolayer, 2 = bilayer |
-| `vF`         | eV·A  | hbar * v_F |
-| `gamma1`     | eV    | Interlayer coupling |
-| `V0`         | meV   | Moire scalar potential |
-| `V1`         | meV   | Moire vector potential |
-| `moire_psi`  | rad   | Moire coupling phase |
-| `eta`        | eV    | Broadening |
-| `nebin`      | —     | Number of energy bins |
-| `elist`      | meV   | Energy grid, e.g. `linspace(-100,100,nebin)` |
+Same physics parameters as the bandstructure stage (`g0` or `vF`, `g1` or
+`gamma1`, `g3` or `v3`, `v0`, `v1`, `moire_psi`, `NQ`, `Nlayers`,
+`U`, `bands`), plus `eta` (eV) for the Green's function broadening
+(converted to meV internally).
+
+There are two modes for specifying the energy grid:
+
+**Mode 1 — Band-adaptive (recommended):** Provide `inputdata` (a band
+structure output file) and `nE`.  The code reads band energies from the
+file, merges overlapping band intervals per valley, and distributes `nE`
+points across only those intervals — no points are wasted in band gaps.
+
+| Parameter    | Description |
+|---|---|
+| `inputdata`  | Path to band structure output file |
+| `nE`         | Total number of energy points (distributed across occupied intervals) |
+
+**Mode 2 — Explicit:** Provide `elist` directly.  The energy grid is
+used as-is for both valleys.  This may include energies with no states.
+
+| Parameter    | Description |
+|---|---|
+| `elist`      | Energy grid in meV, e.g. `linspace(-100,100,500)` |
 
 ### Susceptibility output
 
+Per-valley arrays (not band-resolved — the susceptibility is a property
+of the full spectrum at each energy):
+
 | Variable      | Shape   | Units | Description |
 |---|---|---|---|
-| `dChi_dE_K`   | (NE,)   | —     | K valley susceptibility derivative (×hbar^4, Ang^-2 → m^-2) |
-| `dChi_dE_Kp`  | (NE,)   | —     | K' valley susceptibility derivative |
-| `E_list`      | (NE,)   | eV    | Energy grid |
+| `E_list_K`    | (NE,)   | eV    | Energy grid, K valley |
+| `E_list_Kp`   | (NE,)   | eV    | Energy grid, K' valley |
+| `dChi_dE_K`   | (NE,)   | —     | K valley dChi/dE (×hbar^4, in m^-2 units) |
+| `dChi_dE_Kp`  | (NE,)   | —     | K' valley dChi/dE |
+
+In Mode 1 the K and K' grids may differ (each covers its own band
+intervals).  In Mode 2 both valleys use the same `elist`.
 
 To include the susceptibility correction in Onsager quantization, set
 `susceptibility_datafile` in the onsager input file and use
@@ -438,31 +455,40 @@ Hofstadter mode.  When `qq > 0` is present in the input file, it uses
 the Hofstadter Hamiltonian and velocity operators from
 `hofstadter_system.py` instead of the zero-field plane-wave construction.
 The input file needs the same Hofstadter parameters as the bandstructure
-input (see above), plus the `elist` energy grid:
+input (see above).  Both energy grid modes are supported:
 
+**Band-adaptive (with `inputdata` + `nE`):**
 ```
 qq = 1
-pp = 3
+pp = 4
 g0 = 2134
 g1 = 340
 g3 = 136
 g4 = 0
 delta = 0
-v0 = 28.9
+v0 = 29
 v1 = 21
 w = 110
 eta = 1e-3
 U = [0 0]
-nk1 = 30
+nk1 = 200
 nk2 = nk1
 LL_multiplier = 6
 gamma = 1
 vF = 1e6
 nremotebands = 300
 nlayers = 2
+bands = [-3 -2 -1 0 1 2 3]
 isparallel = 1
-elist = linspace(-100,100,200)
+nE = 500
+inputdata = 'bs_1_4.mat'
 outputfile = 'chi_hofstadter.mat'
+```
+
+**Explicit (with `elist`):**
+```
+% same Hofstadter params as above, but replace nE/inputdata with:
+elist = linspace(35,55,500)
 ```
 
 ## Code files

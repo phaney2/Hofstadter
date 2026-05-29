@@ -2,8 +2,8 @@
 % Matches MATLAB debugging_BC_morb_parfor.m parameters
 isparallel = 1
 calctype = 'bandstructure' 
-outputfile = 'bs.mat'
-theta = 2.0
+outputfile = 'bands_nk_100.mat'
+theta = .0
 qq = 0 
 pp = 2 
 g0 = 2134
@@ -16,9 +16,10 @@ v1 = 21
 w = 110
 eta = 1e-3
 U = [0 0]
-nk1 = 300
+nk1 = 100
 nk2 = nk1
 NQ = 7
 Nmax = 5000
 gamma = 1
-nlayers = 1
+nlayers = 2
+bands = [-3 -2 -1 0 1 2 3]

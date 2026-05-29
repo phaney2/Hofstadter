@@ -1,0 +1,20 @@
+% Zero-field Fukuyama susceptibility
+% python susceptibility.py input_chi_zerofield.txt
+isparallel = 1
+theta = 0
+U = [0 0]
+nk1 = 100
+nk2 = nk1
+NQ = 7
+Nlayers = 2
+g0 = 2140.5
+g1 = 340
+g3 = 0
+v0 = 30
+v1 = 21
+moire_psi = 0.29
+eta = 2e-3
+bands = [-3 -2 -1 0 1 2 3]
+nE = 50
+inputdata = 'bands_nk_100.mat'
+outputfile = 'chi_zerofield.mat'

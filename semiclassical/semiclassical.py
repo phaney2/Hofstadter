@@ -79,14 +79,14 @@ def run_isoenergy(inp, bs_data):
     result = {'nbands': nbands}
 
     for n in range(nbands):
-        emin = min(bs_data['E_K'][n].min(), bs_data['E_Kp'][n].min())
-        emax = max(bs_data['E_K'][n].max(), bs_data['E_Kp'][n].max())
-        E_levels_n = np.linspace(emin, emax, nE)
-        result[f'E_levels_band{n}'] = E_levels_n
-
-        print(f"    band {n}: E = [{emin:.2f}, {emax:.2f}] meV")
-
         for valley in ('K', 'Kp'):
+            emin = bs_data[f'E_{valley}'][n].min()
+            emax = bs_data[f'E_{valley}'][n].max()
+            E_levels_n = np.linspace(emin, emax, nE)
+            result[f'E_levels_{valley}_band{n}'] = E_levels_n
+
+            print(f"    band {n} {valley}: E = [{emin:.2f}, {emax:.2f}] meV")
+
             area, enclosedBC, dL_dE = get_energy_resolved_data(
                 kT,
                 bs_data[f'E_{valley}'][n],
@@ -114,10 +114,8 @@ def run_onsager(inp, iso_data):
     termflags = tuple(termflags_raw[:3])
 
     chi_data = None
-    chi_E_meV = None
     if 'susceptibility_datafile' in inp:
         chi_data = load_data(inp['susceptibility_datafile'])
-        chi_E_meV = np.atleast_1d(chi_data['E_list']).ravel() * 1000
         print(f"  Loaded susceptibility from {inp['susceptibility_datafile']}")
 
     print(f"  Onsager: {len(Blist)} B values, nmax={nmax}, termflags={termflags}")
@@ -131,12 +129,19 @@ def run_onsager(inp, iso_data):
             if key not in iso_data:
                 continue
 
-            E_levels_n = np.atleast_1d(iso_data[f'E_levels_band{n}']).ravel()
+            elev_key = f'E_levels_{valley}_band{n}'
+            if elev_key not in iso_data:
+                elev_key = f'E_levels_band{n}'
+            E_levels_n = np.atleast_1d(iso_data[elev_key]).ravel()
 
             dChi = None
             if chi_data is not None:
                 dChi_raw = np.atleast_1d(
                     chi_data[f'dChi_dE_{valley}']).ravel()
+                chi_E_key = f'E_list_{valley}'
+                if chi_E_key not in chi_data:
+                    chi_E_key = 'E_list'
+                chi_E_meV = np.atleast_1d(chi_data[chi_E_key]).ravel() * 1000
                 dChi = np.interp(E_levels_n, chi_E_meV, dChi_raw)
 
             LL = onsager_fan_band(
