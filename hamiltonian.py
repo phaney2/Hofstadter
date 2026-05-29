@@ -1,6 +1,6 @@
 import numpy as np
 
-from constants import HBAR, Q_E, A_GRAPHENE
+from constants import HBAR, Q_E, A_GRAPHENE, A_HBN
 from numerics import build_fnm_tables
 from basis import outer_product, getindices
 
@@ -78,7 +78,37 @@ def _assemble_interbilayer_terms(N, Nq, chain_matrices, chainlabels,
     return term1, term2, term3, qNslabels
 
 
-def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
+def _compute_RR(theta):
+    """Compute the T-matrix rotation for finite twist angle.
+
+    When theta != 0 the moire reciprocal lattice rotates, but the
+    guiding-center chain q-vectors are kept fixed.  The T-matrices
+    must be rotated to compensate: T -> inv(RR) @ T @ RR.
+    """
+    a = A_GRAPHENE
+    a_hbn = A_HBN
+
+    a1 = a * np.array([0.5, -np.sqrt(3) / 2, 0])
+    a2 = a * np.array([1.0, 0.0, 0.0])
+
+    ct, st = np.cos(theta), np.sin(theta)
+    R = np.array([[ct, -st, 0], [st, ct, 0], [0, 0, 1]])
+
+    Minv = np.eye(3) - (a / a_hbn) * np.linalg.inv(R)
+    M1 = np.linalg.solve(Minv, a1)
+    M2 = np.linalg.solve(Minv, a2)
+    M3 = np.linalg.solve(Minv, np.array([0, 0, 1]))
+
+    vol_G = np.dot(M1, np.cross(M2, M3))
+    G1 = 2 * np.pi * np.cross(M2, M3) / vol_G
+
+    thetaT = (-np.pi / 2 - np.arctan2(G1[1], G1[0])) / 2
+    RR = np.diag([np.cos(thetaT) - 1j * np.sin(thetaT),
+                  np.cos(thetaT) + 1j * np.sin(thetaT)])
+    return RR
+
+
+def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta=0.0):
     """Compute inter-bilayer coupling terms for K valley."""
     q1 = ktheta * np.array([0, -1])
     q2 = ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
@@ -90,6 +120,13 @@ def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
     t2 = phase * np.array([[1, 1], [w**(-1), w**(-1)]])
     t3 = phase * np.array([[1, w**(-1)], [1, w**(-1)]])
 
+    if theta != 0.0:
+        RR = _compute_RR(theta)
+        RRinv = np.conj(RR)
+        t1 = RRinv @ t1 @ RR
+        t2 = RRinv @ t2 @ RR
+        t3 = RRinv @ t3 @ RR
+
     fnm_tables, LLlabels = build_fnm_tables(N, ktheta, lB, [q1, q2, q3])
     chain1, chain2, chain3, chainlabels = _build_chain_matrices_K(Nq, pp, qq)
 
@@ -98,7 +135,7 @@ def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
         fnm_tables, LLlabels, (t1, t2, t3), 'B')
 
 
-def get_interbilayerterms_Kp(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
+def get_interbilayerterms_Kp(N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta=0.0):
     """Compute inter-bilayer coupling terms for K' valley."""
     q1 = -ktheta * np.array([0, -1])
     q2 = -ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
@@ -109,6 +146,13 @@ def get_interbilayerterms_Kp(N, Nq, ktheta, lB, v0, v1, eta, qq, pp):
     t1 = np.conj(phase * np.array([[1, w], [w, w**(-1)]]))
     t2 = np.conj(phase * np.array([[1, 1], [w**(-1), w**(-1)]]))
     t3 = np.conj(phase * np.array([[1, w**(-1)], [1, w**(-1)]]))
+
+    if theta != 0.0:
+        RR = _compute_RR(theta)
+        RRinv = np.conj(RR)
+        t1 = RRinv @ t1 @ RR
+        t2 = RRinv @ t2 @ RR
+        t3 = RRinv @ t3 @ RR
 
     fnm_tables, LLlabels = build_fnm_tables(N, ktheta, lB, [q1, q2, q3])
     chain1, chain2, chain3, chainlabels = _build_chain_matrices_Kp(Nq, pp, qq)

@@ -100,7 +100,7 @@ def do_calc(filepath):
     inp = parse_input_file(filepath)
     locals_dict = dict(inp)
 
-    theta = locals_dict.get('theta', 0.0)
+    theta = np.radians(locals_dict.get('theta', 0.0))
     qq = int(locals_dict['qq'])
     pp = int(locals_dict['pp'])
     g0 = locals_dict['g0']

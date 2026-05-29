@@ -101,7 +101,7 @@ def do_calc(filepath):
     inp = parse_input_file(filepath)
     d = dict(inp)
 
-    theta = d.get('theta', 0.0)
+    theta = np.radians(d.get('theta', 0.0))
     qq = int(d['qq'])
     pp = int(d['pp'])
     g0 = d['g0']
@@ -180,7 +180,7 @@ def do_calc(filepath):
     if 'K' in valley:
         print("  Building K-valley Hamiltonian...")
         term1_K, term2_K, term3_K, qNslabels_K = get_interbilayerterms_K(
-            N, Nq, ktheta, lB, v0, v1, eta, qq, pp)
+            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta)
         Hintra_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'A')
 
         dl = Hintra_K.shape[0]
@@ -203,7 +203,7 @@ def do_calc(filepath):
     if 'Kp' in valley:
         print("  Building K'-valley Hamiltonian...")
         term1_Kp, term2_Kp, term3_Kp, qNslabels_Kp = get_interbilayerterms_Kp(
-            N, Nq, ktheta, lB, v0, v1, eta, qq, pp)
+            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta)
         Hintra_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'A')
 
         dl = Hintra_Kp.shape[0]
@@ -235,7 +235,7 @@ def do_calc(filepath):
     n11 = n1grid.flatten(order='F')
     n22 = n2grid.flatten(order='F')
 
-    vb = np.array([b1 / pp / 2, b2 / pp])
+    vb = np.array([b1 / pp, b2 / pp])
     kpoints = np.zeros((Nk_tot, 2))
     for j in range(Nk_tot):
         frac = np.array([n11[j] / nk1, n22[j] / nk2])

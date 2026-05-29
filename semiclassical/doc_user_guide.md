@@ -63,7 +63,7 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 |---|---|---|
 | `calctype`      | `all`   | Stage to run: `bandstructure`, `isoenergy`, `onsager`, `onsager_bfield`, or `all` |
 | `inputdata`     | —       | Path to prior stage output file (required for `isoenergy`, `onsager`, `onsager_bfield`) |
-| `theta`         | 0       | Twist angle (radians) |
+| `theta`         | 0       | Twist angle between graphene and hBN (degrees; converted to radians internally) |
 | `U`             | [0 0]   | Layer potentials [U_top U_bottom] (meV) |
 | `g3` or `v3`    | 0       | Trigonal warping: `g3` in meV (converted via `v3 = g3 * 2.46 / 1000`), or `v3` in eV·A |
 | `isparallel`    | 0       | 1 = use multiprocessing for k-loop |
@@ -227,16 +227,21 @@ Per-band arrays are stored with suffix `_band{n}` where `n` is the 0-based
 band index.  Each band has its own energy grid, auto-determined from the
 band's energy range.
 
-| Variable              | Shape              | Units   | Description |
+| Variable                | Shape              | Units   | Description |
 |---|---|---|---|
-| `nbands`              | scalar             | —       | Number of bands |
-| `E_levels_band{n}`    | (nE,)              | meV     | Energy grid for band n |
-| `area_K_band{n}`      | (nE, npockets)     | m^-2    | K valley orbit areas for band n |
-| `area_Kp_band{n}`     | (nE, npockets)     | m^-2    | K' valley orbit areas for band n |
-| `enclosedBC_K_band{n}`| (nE, npockets)     | —       | K valley enclosed Berry curvature |
-| `enclosedBC_Kp_band{n}`| (nE, npockets)    | —       | K' valley enclosed Berry curvature |
-| `dL_dE_K_band{n}`     | (nE,)              | —       | K valley orbital moment derivative |
-| `dL_dE_Kp_band{n}`    | (nE,)              | —       | K' valley orbital moment derivative |
+| `nbands`                | scalar             | —       | Number of bands |
+| `E_levels_K_band{n}`    | (nE,)              | meV     | Energy grid for band n, K valley |
+| `E_levels_Kp_band{n}`   | (nE,)              | meV     | Energy grid for band n, K' valley |
+| `area_K_band{n}`        | (nE, npockets)     | m^-2    | K valley orbit areas for band n |
+| `area_Kp_band{n}`       | (nE, npockets)     | m^-2    | K' valley orbit areas for band n |
+| `enclosedBC_K_band{n}`  | (nE, npockets)     | —       | K valley enclosed Berry curvature |
+| `enclosedBC_Kp_band{n}` | (nE, npockets)     | —       | K' valley enclosed Berry curvature |
+| `dL_dE_K_band{n}`       | (nE,)              | —       | K valley orbital moment derivative |
+| `dL_dE_Kp_band{n}`      | (nE,)              | —       | K' valley orbital moment derivative |
+
+Energy grids are per-valley: each valley uses `linspace(Emin, Emax, nE)`
+from its own bandwidth, so the `nE` energy points are concentrated
+within the actual band range rather than spanning the union of both valleys.
 
 ### Onsager output (present when `Blist` is in input, or `calctype = onsager`)
 
@@ -424,7 +429,41 @@ outputfile = 'hofstadter_benchmark.mat'
 ### Hofstadter output
 
 Same format as zero-field output: E_K, E_Kp, Oz_K, Oz_Kp, Lz_K, Lz_Kp,
-kpoints, vol_M. No susceptibility (dChi_dE) in Hofstadter mode.
+kpoints, vol_M.
+
+### Hofstadter susceptibility
+
+The susceptibility calculator (`susceptibility.py`) also supports
+Hofstadter mode.  When `qq > 0` is present in the input file, it uses
+the Hofstadter Hamiltonian and velocity operators from
+`hofstadter_system.py` instead of the zero-field plane-wave construction.
+The input file needs the same Hofstadter parameters as the bandstructure
+input (see above), plus the `elist` energy grid:
+
+```
+qq = 1
+pp = 3
+g0 = 2134
+g1 = 340
+g3 = 136
+g4 = 0
+delta = 0
+v0 = 28.9
+v1 = 21
+w = 110
+eta = 1e-3
+U = [0 0]
+nk1 = 30
+nk2 = nk1
+LL_multiplier = 6
+gamma = 1
+vF = 1e6
+nremotebands = 300
+nlayers = 2
+isparallel = 1
+elist = linspace(-100,100,200)
+outputfile = 'chi_hofstadter.mat'
+```
 
 ## Code files
 

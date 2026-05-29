@@ -75,6 +75,12 @@ than re-parsing the source.
   output E in meV, Oz/Lz/vol_M in SI (m²), dChi_dE in SI.
   Post-processing conversions: Oz×1e-20, Lz×1e-20×1e3, vol_M×1e-20,
   dChi_dE×1e-20×hbar⁴.
+- **Twist angle**: The input parameter `theta` is in **degrees** in all
+  input files. It is converted to radians at the point of parsing in each
+  driver. When `theta != 0`, the T-matrices are rotated via
+  `inv(RR) @ T @ RR` to compensate for the rotated moire pattern while
+  keeping q-vectors canonical. The q-vectors always use fixed directions
+  `[0,-1]`, `[√3/2, 1/2]`, `[-√3/2, 1/2]` scaled by `ktheta = |G1|`.
 - The basis label system (composite strings with `_` separators, searched
   via substring intersection) is load-bearing. Any change to label
   formatting will silently break `getindices` lookups.

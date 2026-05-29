@@ -1,0 +1,28 @@
+% Hofstadter semiclassical benchmark input
+% Matches MATLAB debugging_BC_morb_parfor.m parameters
+isparallel = 1
+calctype = 'bandstructure'
+outputfile = 'bs_1_2.mat'
+theta = 1.0
+qq = 1
+pp = 2
+g0 = 2134
+g1 = 340
+g3 = 136
+g4 = 0
+delta = 0
+v0 = 29
+v1 = 21
+w = 110
+eta = 1e-3
+U = [0 0]
+nk1 = 100
+nk2 = nk1
+LL_multiplier = 6
+Nmax = 5000
+gamma = 1
+vF = 1e6
+num_bands = 26
+nremotebands = 300
+nlayers = 2
+bands = [0 1 2 3 ]

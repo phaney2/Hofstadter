@@ -117,8 +117,9 @@ Code is split across six modules:
 | `_build_chain_matrices_K(Nq, pp, qq)` | Build guiding-center chain hopping matrices for K valley. Returns `(chain1, chain2, chain3, chainlabels)`. |
 | `_build_chain_matrices_Kp(Nq, pp, qq)` | Same for K' valley (phase signs are negated). |
 | `_assemble_interbilayer_terms(...)` | Combine chain matrices, F_nm tables, and sublattice hopping matrices via two nested `outer_product` calls.  Chops the spurious LL_N row/column. Returns `(term1, term2, term3, qNslabels)`. |
-| `get_interbilayerterms_K(...)` | Top-level: defines q-vectors and sublattice hopping matrices `t1,t2,t3` for the K-valley hBN moire potential, then calls `_assemble_interbilayer_terms`.  Uses corrected conventions: `w = exp(-i*2pi/3)`, `psi = +0.29`, order `[3,1,2]`. |
-| `get_interbilayerterms_Kp(...)` | Same for K' valley (negated q-vectors, conjugated T matrices). |
+| `_compute_RR(theta)` | Compute the 2×2 diagonal unitary rotation matrix `RR` for the T-matrix rotation at finite twist angle.  Derives `thetaT` from the direction of the first moire reciprocal lattice vector G1 at the given `theta`. |
+| `get_interbilayerterms_K(...)` | Top-level: defines q-vectors and sublattice hopping matrices `t1,t2,t3` for the K-valley hBN moire potential, then calls `_assemble_interbilayer_terms`.  Uses corrected conventions: `w = exp(-i*2pi/3)`, `psi = +0.29`, order `[3,1,2]`.  When `theta != 0`, applies `inv(RR) @ T @ RR` to each T-matrix to compensate for the rotated moire pattern while keeping q-vectors canonical. |
+| `get_interbilayerterms_Kp(...)` | Same for K' valley (negated q-vectors, conjugated T matrices, same RR rotation). |
 | `get_interbilayerterms_K_testing(...)` | Parameterized version with configurable `order`, `sxflag`, `dagger`, `conj_flag`, `psi_conj` flags.  Used by `hofstadter_testing.py` for convention exploration. |
 | `get_interbilayerterms_Kp_testing(...)` | Same for K' valley. |
 | `get_intermonolayerH_K(N, theta, B, labels, params)` | Inter-monolayer coupling (gamma1 constant, gamma3 raising, gamma4 lowering operators). K valley. |
@@ -253,6 +254,35 @@ For bilayer, this is placed in the bottom-right block of the 2-layer
 Hamiltonian (hBN substrate acts on the bottom layer only).  For monolayer,
 it is added directly to the single-layer Hamiltonian.
 
+### T-matrix rotation at finite twist angle
+
+When the twist angle `theta != 0`, the physical moire reciprocal lattice
+vectors rotate away from the canonical directions.  However, the
+guiding-center chain matrices are always constructed with canonical
+(unrotated) q-vectors: `q1 = ktheta * [0, -1]`, etc.  To keep the
+T-matrices consistent with these fixed q-vectors, each T-matrix is
+conjugated by a sublattice rotation matrix `RR`:
+
+```
+T_i → inv(RR) @ T_i @ RR
+```
+
+The rotation angle `thetaT` is derived from the actual (rotated) first
+moire reciprocal lattice vector G1:
+
+```
+thetaT = (-pi/2 - atan2(G1_y, G1_x)) / 2
+RR = diag(exp(-i*thetaT), exp(+i*thetaT))
+```
+
+At `theta = 0`, G1 points along `[0, -1]`, giving `thetaT = 0` and
+`RR = I` (no rotation).  The same rotation is applied in both the
+Hofstadter code (`hamiltonian.py`) and the semiclassical code
+(`bandstructure.py`).
+
+The input parameter `theta` is specified in **degrees** and converted
+to radians internally.
+
 ---
 
 ## 7. Parallelization
@@ -333,7 +363,7 @@ If `outputfile` is not set, defaults to `bands_p{pp}_q{qq}.npz`.
 | `w` | meV | same | Interlayer coupling scale (used for LL cutoff estimate) |
 | `nlayers` | int | -- | Number of graphene layers: 1 (monolayer) or 2 (bilayer, default) |
 | `U` | meV | same | Layer on-site energies: scalar for monolayer, `[U_top, U_bottom]` for bilayer |
-| `theta` | radians | -- | Twist angle (0 for aligned BLG/hBN) |
+| `theta` | degrees (input) | radians (internal) | Twist angle between graphene and hBN |
 | `eta` | dimensionless | -- | AA/AB hopping ratio (legacy; not active for hBN) |
 
 ---

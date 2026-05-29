@@ -48,13 +48,18 @@ def compute_moire_geometry(theta, a=2.46, a_hBN=2.504):
     G2 = 2 * np.pi * np.cross(M3, M1) / vol_G
     G3 = 2 * np.pi * np.cross(M1, M2) / vol_G
 
-    vb = np.array([G1, G2, G3])
+    G1_xy = G1[:2]
 
-    q1 = G1[:2]
-    q2 = G2[:2]
+    ktheta = np.linalg.norm(G1_xy)
+    q1 = ktheta * np.array([0.0, -1.0])
+    q2 = ktheta * np.array([np.sqrt(3) / 2, 0.5])
     q3 = -q1 - q2
 
-    return q1, q2, q3, vol_M, vb
+    vb = np.array([[q1[0], q1[1], 0],
+                   [q2[0], q2[1], 0],
+                   [0, 0, 2 * np.pi / np.linalg.norm(M3)]])
+
+    return q1, q2, q3, vol_M, vb, G1_xy
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +89,7 @@ def _kron_del(v1, v2, tol=1e-6):
     return 1.0 if np.linalg.norm(v1 - v2) < tol else 0.0
 
 
-def construct_hopping(Q, NG, q1, q2, q3, V0, V1, psi):
+def construct_hopping(Q, NG, q1, q2, q3, V0, V1, psi, G1_xy=None):
     w = np.exp(-1j * 2 * np.pi / 3)
 
     T0_K  = V0 * np.eye(2, dtype=complex)
@@ -96,6 +101,15 @@ def construct_hopping(Q, NG, q1, q2, q3, V0, V1, psi):
     T3_Kp = V1 * np.exp(1j * psi) * np.array([[1, w**-1], [1, w**-1]])
     T1_Kp = V1 * np.exp(1j * psi) * np.array([[1, w],     [w, w**-1]])
     T2_Kp = V1 * np.exp(1j * psi) * np.array([[1, 1],     [w**-1, w**-1]])
+
+    if G1_xy is not None:
+        thetaT = (-np.pi / 2 - np.arctan2(G1_xy[1], G1_xy[0])) / 2
+        if abs(thetaT) > 1e-12:
+            RR = np.diag([np.cos(thetaT) - 1j * np.sin(thetaT),
+                          np.cos(thetaT) + 1j * np.sin(thetaT)])
+            RRinv = np.conj(RR)
+            for T in (T1_K, T2_K, T3_K, T1_Kp, T2_Kp, T3_Kp):
+                T[:] = RRinv @ T @ RR
 
     HK  = np.zeros((2*NG, 2*NG), dtype=complex)
     HKp = np.zeros((2*NG, 2*NG), dtype=complex)
@@ -421,7 +435,7 @@ def do_calc(filepath):
     if qq > 0:
         return _do_calc_hofstadter(inp)
 
-    theta    = float(inp.get('theta', 0.0))
+    theta    = np.radians(float(inp.get('theta', 0.0)))
     nlayers  = int(inp.get('Nlayers', 2))
     nk1      = int(inp['nk1'])
     nk2      = int(inp['nk2'])
@@ -440,7 +454,7 @@ def do_calc(filepath):
         v3 = float(inp.get('v3', 0))
     V0_meV   = float(inp.get('v0', inp.get('V0')))
     V1_meV   = float(inp.get('v1', inp.get('V1')))
-    psi      = float(inp['moire_psi'])
+    psi      = float(inp.get('moire_psi', 0.29))
     eta      = float(inp['eta'])
     ispar    = int(inp.get('isparallel', 0))
     nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
@@ -457,7 +471,7 @@ def do_calc(filepath):
     Ubm   = U[1] / 1000 if len(U) > 1 else U[0] / 1000
 
     # --- Moire geometry ---
-    q1, q2, q3, vol_M, vb = compute_moire_geometry(theta)
+    q1, q2, q3, vol_M, vb, G1_xy = compute_moire_geometry(theta)
     Q, NG = build_qvectors(NQ, q1, q2)
     numwann = 2 * NG * nlayers
 
@@ -467,7 +481,7 @@ def do_calc(filepath):
 
     # --- Hopping matrices ---
     H_hopp_K, H_hopp_Kp = construct_hopping(
-        Q, NG, q1, q2, q3, V0_ev, V1_ev, psi)
+        Q, NG, q1, q2, q3, V0_ev, V1_ev, psi, G1_xy)
 
     # --- K-mesh ---
     Nk_tot = nk1 * nk2

@@ -39,7 +39,7 @@ def build_hofstadter_setup(inp):
     Returns a dict with H_base, term1/2/3, Ax/Ay, k-mesh, and indexing
     for both valleys.  All energies in eV, lengths in Angstrom.
     """
-    theta = float(inp.get('theta', 0.0))
+    theta = np.radians(float(inp.get('theta', 0.0)))
     qq = int(inp['qq'])
     pp = int(inp['pp'])
     g0 = float(inp['g0'])
@@ -117,7 +117,7 @@ def build_hofstadter_setup(inp):
     # --- K valley ---
     print("  Building K-valley Hamiltonian...")
     term1_K, term2_K, term3_K, qNslabels_K = get_interbilayerterms_K(
-        N, Nq, ktheta, lB, v0_J, v1_J, eta_bc, qq, pp)
+        N, Nq, ktheta, lB, v0_J, v1_J, eta_bc, qq, pp, theta)
     Hintra_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'A')
     Ax_K, Ay_K = get_berry_connection_K(N, B, qNslabels_K)
 
@@ -143,7 +143,7 @@ def build_hofstadter_setup(inp):
     # --- K' valley ---
     print("  Building K'-valley Hamiltonian...")
     term1_Kp, term2_Kp, term3_Kp, qNslabels_Kp = get_interbilayerterms_Kp(
-        N, Nq, ktheta, lB, v0_J, v1_J, eta_bc, qq, pp)
+        N, Nq, ktheta, lB, v0_J, v1_J, eta_bc, qq, pp, theta)
     Hintra_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'A')
     Ax_Kp, Ay_Kp = get_berry_connection_Kp(N, B, qNslabels_Kp)
 

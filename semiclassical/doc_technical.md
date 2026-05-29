@@ -15,9 +15,9 @@ semiclassical.py          # stage-dispatch driver
 ### Band structure engine (zero-field)
 ```
 bandstructure.py          # moire Hamiltonian, Berry curvature, orbital moment
-  compute_moire_geometry   →  q1, q2, q3, vol_M, vb
+  compute_moire_geometry   →  q1, q2, q3, vol_M, vb, G1_xy
   build_qvectors           →  Q (NG×2), NG
-  construct_hopping         →  H_hopp_K, H_hopp_Kp  (2NG × 2NG)
+  construct_hopping         →  H_hopp_K, H_hopp_Kp  (2NG × 2NG)  [applies T-matrix rotation when G1_xy given]
   assemble_H_V_K / _Kp     →  H, Vx, Vy  (numwann × numwann)
   _kpoint_worker            →  per-k eigensolve + Berry curvature + orbital moment
   do_calc                   →  orchestrates k-loop, collects results, unit converts
@@ -114,6 +114,42 @@ K':  T1_Kp with ∓q1,  T2_Kp with ∓q2,  T3_Kp with ∓q3
 
 Hopping: `H_hopp(j,k) = d0*T0 + (d_fwd*T† + d_rev*T)` for each of the
 three moire vectors.
+
+### Canonical q-vectors and T-matrix rotation
+
+The q-vectors used throughout the Hamiltonian (Q-lattice construction,
+hopping Kronecker deltas, k-mesh) always use canonical directions
+regardless of the twist angle `theta`:
+```
+q1 = ktheta * [0, -1]
+q2 = ktheta * [sqrt(3)/2, 1/2]
+q3 = -q1 - q2
+```
+where `ktheta = |G1|` scales with the moire period (which depends on
+theta).  The k-mesh reciprocal lattice vectors `vb` are built from these
+same canonical q-vectors so the BZ, Q-lattice, and Hamiltonian periodicity
+are all consistent.
+
+When `theta != 0`, the physical moire pattern rotates, and the T-matrices
+must be rotated to compensate:
+```
+T_i → inv(RR) @ T_i @ RR
+```
+where `RR = diag(exp(-i*thetaT), exp(+i*thetaT))` and
+`thetaT = (-pi/2 - atan2(G1_y, G1_x)) / 2`, computed from the actual
+(rotated) G1 direction returned by `compute_moire_geometry` as `G1_xy`.
+
+The `T0` (uniform on-site) matrices are diagonal and commute with `RR`,
+so only `T1, T2, T3` (and their K' counterparts) are rotated.
+
+At `theta = 0`, `G1` points along `[0, -1]`, giving `thetaT = 0` and
+`RR = I`.
+
+The real-space moire cell area `vol_M` is always computed from the full
+rotated geometry (it is a scalar invariant under rotation of the q-vectors).
+
+The input parameter `theta` is specified in **degrees** and converted to
+radians internally.
 
 ## Berry curvature and orbital moment (Kubo formula)
 

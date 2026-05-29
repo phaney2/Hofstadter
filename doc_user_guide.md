@@ -72,7 +72,7 @@ variables (e.g., `elist` can use `nebin`).
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `nlayers` | int | `2` | Number of graphene layers: 1 = monolayer, 2 = bilayer |
-| `theta` | float (rad) | `0.0` | Twist angle |
+| `theta` | float (deg) | `0.0` | Twist angle between graphene and hBN |
 | `eta` | float | `2` | AA/AB ratio (legacy) |
 | `U` | array (meV) | `0*[1 1]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer |
 | `nk1` | int | `10` | k-mesh points along b1 |
@@ -109,7 +109,7 @@ variables (e.g., `elist` can use `nebin`).
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `nlayers` | int | `2` | 1 = monolayer, 2 = bilayer |
-| `theta` | float (rad) | `0.0` | Twist angle |
+| `theta` | float (deg) | `0.0` | Twist angle between graphene and hBN |
 | `U` | array (meV) | `[0 0]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer |
 | `NQ` | int | `7` | Q-vector grid size per direction (total: NQ^2 plane waves) |
 | `dk` | float (1/A) | `5e-4` | k-point spacing along the path |
@@ -292,7 +292,7 @@ elist = linspace(-300, 300, nebin);
 ### Zero-field bilayer (matching MATLAB benchmark)
 
 ```
-theta = 0.0174532925199433;
+theta = 1.0;
 nlayers = 2;
 g0 = 2472;
 hbar_vF = 5.2657;

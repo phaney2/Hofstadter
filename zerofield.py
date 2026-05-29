@@ -237,7 +237,7 @@ def _make_kpath(q1, q2, dk, valley):
 def do_calc(filepath):
     inp = parse_input_file(filepath)
 
-    theta = inp.get('theta', 0.0)
+    theta = np.radians(inp.get('theta', 0.0))
     nlayers = int(inp.get('nlayers', 2))
     g0 = inp['g0']
     g1 = inp.get('g1', 340)
