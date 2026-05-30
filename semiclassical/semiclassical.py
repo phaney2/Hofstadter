@@ -374,19 +374,23 @@ def main(fpath=None):
     elif calctype == 'all':
         print("=== Running all stages ===")
         bs_result = run_bandstructure(inp, fpath)
-        result = bs_result
+
+        nk_tag = int(inp['nk1'])
+        ext = '.mat'
+        bs_outfile = inp.get('outputfile',
+                             f'electronic_structure_data_{nk_tag}{ext}')
+        save_result(bs_result, bs_outfile)
 
         if 'nE' in inp:
             iso_result = run_isoenergy(inp, bs_result)
-            result = {**result, **iso_result}
+            base, ext = os.path.splitext(bs_outfile)
+            iso_outfile = f'{base}_isoenergy{ext}'
+            save_result(iso_result, iso_outfile)
 
             if 'Blist' in inp:
                 ons_result = run_onsager(inp, iso_result)
-                result = {**result, **ons_result}
-
-        outfile = inp.get('outputfile',
-                          f'electronic_structure_data_{int(inp["nk1"])}.mat')
-        save_result(result, outfile)
+                ons_outfile = f'{base}_onsager{ext}'
+                save_result(ons_result, ons_outfile)
 
     else:
         raise ValueError(
