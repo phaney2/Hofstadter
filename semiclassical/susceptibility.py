@@ -189,7 +189,8 @@ def _do_calc_chi_hofstadter(inp):
     Nk_tot = nk1 * nk2
     kpoints = setup['kpoints']
     vol_M = setup['vol_M']
-    weight_factor = 1.0 / (Nk_tot * vol_M)
+    vol_M_Ang2 = vol_M * 1e20
+    weight_factor = 1.0 / (Nk_tot * vol_M_Ang2)
 
     if 'inputdata' in inp:
         from semiclassical import load_data
@@ -248,8 +249,8 @@ def _do_calc_chi_hofstadter(inp):
     return {
         'E_list_K': elist_K / 1000,
         'E_list_Kp': elist_Kp / 1000,
-        'dChi_dE_K': dChi_K * hbar**4,
-        'dChi_dE_Kp': dChi_Kp * hbar**4,
+        'dChi_dE_K': dChi_K * 1e-20 * hbar**4,
+        'dChi_dE_Kp': dChi_Kp * 1e-20 * hbar**4,
     }
 
 
