@@ -109,16 +109,16 @@ def run_onsager(inp, iso_data):
     nmax = int(inp.get('nmax', 50))
     nbands = int(iso_data['nbands'])
 
-    termflags_raw = np.atleast_1d(
-        inp.get('termflags', np.array([1, 1, 1]))).astype(int)
-    termflags = tuple(termflags_raw[:3])
+    tf_raw = np.atleast_1d(
+        inp.get('term_factors', np.array([1.0, 1.0, 1.0]))).astype(float)
+    term_factors = tuple(tf_raw[:3])
 
     chi_data = None
     if 'susceptibility_datafile' in inp:
         chi_data = load_data(inp['susceptibility_datafile'])
         print(f"  Loaded susceptibility from {inp['susceptibility_datafile']}")
 
-    print(f"  Onsager: {len(Blist)} B values, nmax={nmax}, termflags={termflags}")
+    print(f"  Onsager: {len(Blist)} B values, nmax={nmax}, term_factors={term_factors}")
 
     result = {'Blist': Blist, 'nmax': nmax}
 
@@ -144,15 +144,16 @@ def run_onsager(inp, iso_data):
                 chi_E_meV = np.atleast_1d(chi_data[chi_E_key]).ravel() * 1000
                 dChi = np.interp(E_levels_n, chi_E_meV, dChi_raw)
 
-            LL = onsager_fan_band(
+            ll_dict = onsager_fan_band(
                 Blist, nmax, E_levels_n,
                 iso_data[key],
                 iso_data[f'enclosedBC_{valley}_band{n}'],
                 np.atleast_1d(iso_data[f'dL_dE_{valley}_band{n}']).ravel(),
-                dChi_dE=dChi, termflags=termflags)
+                dChi_dE=dChi, term_factors=term_factors)
 
-            if LL is not None:
-                result[f'LL_{valley}_band{n}'] = LL
+            if ll_dict is not None:
+                for suffix, LL in ll_dict.items():
+                    result[f'LL_{valley}_band{n}_{suffix}'] = LL
                 n_with_orbits += 1
 
         print(f"  {valley} valley: {n_with_orbits} bands with orbits")
@@ -173,7 +174,7 @@ def _onsager_bfield_worker(args):
     from isoenergy import isoenergy_areas
     from onsager import onsager_fan_band
 
-    B, nE, nmax, gfactor, termflags = args
+    B, nE, nmax, gfactor, term_factors = args
     shared = _onsager_bfield_shared
 
     E_bands = shared['E_bands']
@@ -186,7 +187,7 @@ def _onsager_bfield_worker(args):
     nbands = E_bands.shape[0]
     Nk = nk1 * nk2
     kweight = (2 * np.pi)**2 / (Nk * vol_M)
-    termflags_3 = (int(termflags[0]), 0, int(termflags[1]))
+    tf_3 = (float(term_factors[0]), 0.0, float(term_factors[1]))
 
     hbar = 1.054571817e-34       # J * s
     e_charge = 1.602176634e-19   # C
@@ -210,15 +211,15 @@ def _onsager_bfield_worker(args):
                 area[i, p] = a_val
                 enclosedBC[i, p] = np.sum(Oz_bands[n][k_idx]) * kweight
 
-        LL = onsager_fan_band(
+        ll_dict = onsager_fan_band(
             [B], nmax, E_levels, area, enclosedBC,
-            np.zeros(nE), termflags=termflags_3)
+            np.zeros(nE), term_factors=tf_3)
 
         band_results[n] = {
             'area': area,
             'enclosedBC': enclosedBC,
             'E_levels': E_levels,
-            'LL': LL[0] if LL is not None else None,
+            'll_dict': {k: v[0] for k, v in ll_dict.items()} if ll_dict is not None else None,
         }
 
     return band_results
@@ -234,9 +235,9 @@ def run_onsager_bfield(inp, bs_data):
     if nprocs is not None:
         nprocs = int(nprocs)
 
-    termflags_raw = np.atleast_1d(
-        inp.get('termflags', np.array([1, 0]))).astype(int)
-    termflags = tuple(termflags_raw[:2])
+    tf_raw = np.atleast_1d(
+        inp.get('term_factors', np.array([1.0, 1.0]))).astype(float)
+    term_factors = tuple(tf_raw[:2])
 
     nk1 = int(bs_data['nk1'])
     nk2 = int(bs_data['nk2'])
@@ -245,7 +246,7 @@ def run_onsager_bfield(inp, bs_data):
     nB = len(Blist)
 
     print(f"  onsager_bfield: {nB} B values, nmax={nmax}, nE={nE}, "
-          f"gfactor={gfactor}, termflags={termflags}")
+          f"gfactor={gfactor}, term_factors={term_factors}")
 
     result = {'Blist': Blist, 'nmax': nmax, 'nE': nE,
               'nbands': nbands, 'gfactor': gfactor}
@@ -258,7 +259,7 @@ def run_onsager_bfield(inp, bs_data):
             'vol_M': vol_M, 'nk1': nk1, 'nk2': nk2,
         }
 
-        args_list = [(B, nE, nmax, gfactor, termflags) for B in Blist]
+        args_list = [(B, nE, nmax, gfactor, term_factors) for B in Blist]
 
         if isparallel:
             import multiprocessing
@@ -283,10 +284,15 @@ def run_onsager_bfield(inp, bs_data):
             max_pock = max(all_results[iB][n]['area'].shape[1]
                           for iB in range(nB))
 
-            LL_arr = np.full((nB, nmax + 1), np.nan)
             area_arr = np.zeros((nB, nE, max_pock))
             bc_arr = np.zeros((nB, nE, max_pock))
             elev_arr = np.zeros((nB, nE))
+
+            ll_suffixes = set()
+            for iB in range(nB):
+                if all_results[iB][n]['ll_dict'] is not None:
+                    ll_suffixes.update(all_results[iB][n]['ll_dict'].keys())
+            ll_arrs = {s: np.full((nB, nmax + 1), np.nan) for s in ll_suffixes}
 
             has_orbits = False
             for iB in range(nB):
@@ -295,19 +301,21 @@ def run_onsager_bfield(inp, bs_data):
                 area_arr[iB, :, :np_b] = br['area']
                 bc_arr[iB, :, :np_b] = br['enclosedBC']
                 elev_arr[iB, :] = br['E_levels']
-                if br['LL'] is not None:
-                    LL_arr[iB, :] = br['LL']
+                if br['ll_dict'] is not None:
+                    for s, ll_row in br['ll_dict'].items():
+                        ll_arrs[s][iB, :] = ll_row
                     has_orbits = True
 
             result[f'area_{valley}_band{n}'] = area_arr
             result[f'enclosedBC_{valley}_band{n}'] = bc_arr
             result[f'E_levels_{valley}_band{n}'] = elev_arr
             if has_orbits:
-                result[f'LL_{valley}_band{n}'] = LL_arr
+                for s, arr in ll_arrs.items():
+                    result[f'LL_{valley}_band{n}_{s}'] = arr
 
         n_with_orbits = sum(
             1 for n in range(nbands)
-            if f'LL_{valley}_band{n}' in result)
+            if f'LL_{valley}_band{n}_S' in result)
         print(f"  {valley} valley: {n_with_orbits} bands with orbits")
 
     print("  Done.")

@@ -148,8 +148,8 @@ differences — see below.
    differences for bands with few orbit energies (e.g., band 6).
 
 2. **MATLAB chi bug**: `get_semiclassical_LL.m` line 31 ends with
-   semicolon, making the `chiflag * dChi_dE` term a no-op. Use
-   `termflags=(1,1,0)` when comparing against MATLAB.
+   semicolon, making the `chiflag * dChi_dE` term a no-op. When
+   comparing against MATLAB, use the `_SBM` output (which excludes chi).
 
 3. **Enclosed Berry curvature sign**: There is an unresolved systematic
    shift in LL positions for bands in the +40 to +60 meV range (K valley).

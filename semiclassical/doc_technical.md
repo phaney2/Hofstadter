@@ -227,8 +227,8 @@ Implemented as `(vx .* g_row) @ (vy .* g_row) @ ...` where
 Energy argument is in meV (elist), eigenvalues converted from eV via ×1e3.
 
 Output: `dChi_dE_K`, `dChi_dE_Kp`, `E_list`. To include chi in Onsager
-quantization, set `susceptibility_datafile` in the onsager input and use
-`termflags = [1 1 1]`.
+quantization, set `susceptibility_datafile` in the onsager input.  The
+chi term appears in the `_SBMC` output suffix.
 
 ## Unit conversions (post-processing)
 
@@ -312,8 +312,9 @@ and providing prior results via `inputdata`.
 The Onsager step uses its own energy grid (`elist_onsager`, defaults to
 `elist`) so it can be denser than needed for other purposes.
 
-Output keys: `Blist` (nB,), `nmax` (scalar), `LL_K_band{i}` (nB, nmax+1)
-and `LL_Kp_band{i}` (nB, nmax+1) for each band with orbits.
+Output keys: `Blist` (nB,), `nmax` (scalar), and per-band cumulative LL
+arrays with suffixes `_S`, `_SB`, `_SBM`, `_SBMC` (e.g.
+`LL_K_band{i}_S`, `LL_K_band{i}_SBM`) for each band with orbits.
 
 ## Non-perturbative Onsager (`onsager_bfield`)
 
@@ -332,8 +333,8 @@ E_mod(k) = E_K(k) + gfactor × B × Lz_K(k)
 
 Then computes isoenergy contours on E_mod, finds enclosed Berry curvature,
 and solves the Onsager condition. Since the orbital moment is already in
-the energy surface, `morbflag` is forced to 0 internally. The `termflags`
-input is 2-element `[BCflag, chiflag]`.
+the energy surface, the morb factor is forced to 0 internally. The
+`term_factors` input is 2-element `[BC_factor, chi_factor]`.
 
 Each B value is independent; parallelized over Blist via `multiprocessing.Pool`
 when `isparallel=1`. The worker calls `isoenergy_areas` directly (not

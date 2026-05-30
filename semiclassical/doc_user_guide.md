@@ -33,7 +33,7 @@ bandstructure  →  onsager_bfield
 | `all` (default)   | physics params         | everything merged into one file                    |
 
 Running stages separately lets you iterate on downstream parameters
-(e.g. different B-field ranges or termflags) without re-running the
+(e.g. different B-field ranges or term_factors) without re-running the
 expensive k-mesh calculation.
 
 ## Input file
@@ -70,19 +70,19 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `kT`            | 3       | Thermal broadening for dL/dE (meV) |
 | `Blist`         | —       | Magnetic field values (T) for Onsager quantization, e.g. `linspace(0,12,100)` |
 | `nmax`          | 50      | Maximum Landau level index (used with `Blist`) |
-| `termflags`     | [1 1 1] | Onsager correction terms to include: `[BCflag morbflag chiflag]` (see below) |
+| `term_factors`  | [1 1 1] | Multiplicative factors for Onsager correction terms: `[BC_factor morb_factor chi_factor]` (see below) |
 | `susceptibility_datafile` | — | Path to susceptibility `.mat` file (for `onsager` stage with `chiflag=1`) |
 | `gfactor`       | 1       | Orbital moment prefactor for `onsager_bfield`: E_mod = E_K + gfactor×B×Lz_K |
 | `outputfile`    | auto    | Output filename; defaults to `electronic_structure_data_{nk1}.mat` |
 
-### Onsager quantization terms (`termflags`)
+### Onsager quantization terms (`term_factors`)
 
 The Onsager quantization condition solved by the code is:
 
 ```
-S(E)/(2π)² + BCflag × Φ_B·B/(2π·φ₀)
-           + morbflag × (dL/dE)·B/(2π·φ₀)
-           + chiflag × (2π)·(dχ/dE)·B²/φ₀²
+S(E)/(2π)² + BC_factor × Φ_B·B/(2π·φ₀)
+           + morb_factor × (dL/dE)·B/(2π·φ₀)
+           + chi_factor × (2π)·(dχ/dE)·B²/φ₀²
            = B·(n + ½)/φ₀
 ```
 
@@ -91,19 +91,25 @@ curvature, `dL/dE` is the energy derivative of the orbital moment, and
 `dχ/dE` is the Fukuyama susceptibility derivative. `φ₀ = 2πℏ/e` is the
 flux quantum.
 
-The `termflags` parameter is a 3-element array `[BCflag morbflag chiflag]`
-that toggles each correction term (1 = include, 0 = exclude):
+The code **always** computes four cumulative sets of Landau levels:
 
-| Flag       | Term | Physical origin |
+| Output suffix | Terms included |
+|---|---|
+| `_S`   | S(E) only (bare Onsager) |
+| `_SB`  | S + BC_factor × enclosed Berry curvature |
+| `_SBM` | S + BC + morb_factor × dL/dE |
+| `_SBMC`| S + BC + morb + chi_factor × chi' (only if susceptibility data provided) |
+
+The `term_factors` parameter is an optional 3-element array
+`[BC_factor morb_factor chi_factor]` of multiplicative prefactors on each
+correction term.  Default is `[1 1 1]`.  Use e.g. `[1 -1 1]` to flip the
+sign of the orbital moment term.
+
+| Factor         | Term | Physical origin |
 |---|---|---|
-| `BCflag`   | `Φ_B·B/(2π·φ₀)` | Enclosed Berry curvature — shifts the Maslov phase |
-| `morbflag` | `(dL/dE)·B/(2π·φ₀)` | Orbital magnetic moment — energy shift of orbits in B |
-| `chiflag`  | `(2π)·(dχ/dE)·B²/φ₀²` | Fukuyama susceptibility — second-order B² correction |
-
-Setting `termflags = [1 1 1]` (default) includes all three corrections.
-Setting `termflags = [1 1 0]` matches the MATLAB benchmark (which has an
-inactive `chiflag` term due to a code bug). Setting `termflags = [0 0 0]`
-gives bare Onsager quantization with no corrections.
+| `BC_factor`    | `Φ_B·B/(2π·φ₀)` | Enclosed Berry curvature — shifts the Maslov phase |
+| `morb_factor`  | `(dL/dE)·B/(2π·φ₀)` | Orbital magnetic moment — energy shift of orbits in B |
+| `chi_factor`   | `(2π)·(dχ/dE)·B²/φ₀²` | Fukuyama susceptibility — second-order B² correction |
 
 ### Example input file
 
@@ -130,7 +136,6 @@ outputfile = 'results_200.mat'
 nE = 500
 Blist = linspace(0,12,100)
 nmax = 50
-termflags = [1 1 0]
 ```
 
 ### Staged input files
@@ -174,7 +179,6 @@ inputdata = 'iso_nk100.mat'
 outputfile = 'onsager_result.mat'
 Blist = linspace(0,12,100)
 nmax = 30
-termflags = [0 1 0]
 ```
 
 **Alternative Stage 3 — onsager_bfield (non-perturbative Lz):**
@@ -187,14 +191,15 @@ Blist = linspace(0,12,50)
 nmax = 30
 nE = 200
 gfactor = 1
-termflags = [1 0]
 ```
 
 This mode branches directly from bandstructure output (not isoenergy).
 At each B, it forms E_mod(k) = E_K(k) + gfactor×B×Lz_K(k) and
 recomputes isoenergy contours on the modified energy surface. The
-orbital moment is included non-perturbatively, so `morbflag` is forced
-to 0 internally. The `termflags` array is 2-element: `[BCflag chiflag]`.
+orbital moment is included non-perturbatively, so the morb term is
+forced to 0 internally. The `term_factors` array is 2-element:
+`[BC_factor chi_factor]`.  Output keys use suffixes `_S`, `_SB`, `_SBC`
+(SBM is skipped since morb is in the energy surface).
 Intermediate orbit data (areas, enclosed BC) are saved per B value for
 debugging.
 
@@ -245,14 +250,17 @@ within the actual band range rather than spanning the union of both valleys.
 
 ### Onsager output (present when `Blist` is in input, or `calctype = onsager`)
 
-| Variable      | Shape               | Units   | Description |
+| Variable                   | Shape               | Units   | Description |
 |---|---|---|---|
-| `Blist`       | (nB,)               | T       | Magnetic field values |
-| `nmax`        | scalar               | —       | Maximum Landau level index |
-| `LL_band{i}`  | (nB, nmax+1)        | meV     | Landau level energies for band i (K valley) |
+| `Blist`                    | (nB,)               | T       | Magnetic field values |
+| `nmax`                     | scalar               | —       | Maximum Landau level index |
+| `LL_{v}_band{i}_S`         | (nB, nmax+1)        | meV     | LL from isoenergy area only |
+| `LL_{v}_band{i}_SB`        | (nB, nmax+1)        | meV     | + enclosed Berry curvature |
+| `LL_{v}_band{i}_SBM`       | (nB, nmax+1)        | meV     | + dL/dE orbital moment |
+| `LL_{v}_band{i}_SBMC`      | (nB, nmax+1)        | meV     | + chi' susceptibility (if data provided) |
 
-One `LL_band{i}` matrix is saved per band that has closed orbits.
-The index `i` is the 0-based band index within the selected bands array.
+where `{v}` is `K` or `Kp` and `{i}` is the 0-based band index.
+One set of suffixed matrices is saved per band that has closed orbits.
 
 ### Onsager_bfield output (`calctype = onsager_bfield`)
 
@@ -263,8 +271,9 @@ The index `i` is the 0-based band index within the selected bands array.
 | `nE`                      | scalar                | —       | Energy points per band |
 | `nbands`                  | scalar                | —       | Number of bands |
 | `gfactor`                 | scalar                | —       | Orbital moment prefactor |
-| `LL_K_band{n}`            | (nB, nmax+1)          | meV     | K valley LL energies |
-| `LL_Kp_band{n}`           | (nB, nmax+1)          | meV     | K' valley LL energies |
+| `LL_{v}_band{n}_S`        | (nB, nmax+1)          | meV     | LL from area only |
+| `LL_{v}_band{n}_SB`       | (nB, nmax+1)          | meV     | + enclosed BC |
+| `LL_{v}_band{n}_SBM`      | (nB, nmax+1)          | meV     | + dL/dE (zeros — morb is in E_mod) |
 | `area_K_band{n}`          | (nB, nE, npockets)    | m^-2    | K valley orbit areas per B |
 | `area_Kp_band{n}`         | (nB, nE, npockets)    | m^-2    | K' valley orbit areas per B |
 | `enclosedBC_K_band{n}`    | (nB, nE, npockets)    | —       | K valley enclosed BC per B |
@@ -296,13 +305,14 @@ Returns:
 from onsager import onsager_fan_band
 
 Blist = np.linspace(0, 12, 100)   # Tesla
-LL = onsager_fan_band(Blist, nmax=30, E_levels=E_levels,
-                      area=area, enclosedBC=enclosedBC,
-                      dL_dE=dL_dE)
+ll_dict = onsager_fan_band(Blist, nmax=30, E_levels=E_levels,
+                           area=area, enclosedBC=enclosedBC,
+                           dL_dE=dL_dE)
 ```
 
-Returns `LL` as (nB, nmax+1) array of Landau level energies, or
-`None` if the band has no closed orbits.
+Returns a dict `{'S': LL_S, 'SB': LL_SB, 'SBM': LL_SBM}` where each
+value is (nB, nmax+1).  If `dChi_dE` is provided, adds `'SBMC'`.
+Returns `None` if the band has no closed orbits.
 
 ## Running on a cluster
 
@@ -373,17 +383,17 @@ In Mode 1 the K and K' grids may differ (each covers its own band
 intervals).  In Mode 2 both valleys use the same `elist`.
 
 To include the susceptibility correction in Onsager quantization, set
-`susceptibility_datafile` in the onsager input file and use
-`termflags = [1 1 1]`:
+`susceptibility_datafile` in the onsager input file:
 
 ```
 calctype = 'onsager'
 inputdata = 'iso_nk100.mat'
 susceptibility_datafile = 'chi_data.mat'
-termflags = [1 1 1]
 Blist = linspace(0,12,100)
 nmax = 30
 ```
+
+This adds a fourth cumulative level (`_SBMC`) to the output.
 
 ## Hofstadter mode
 
