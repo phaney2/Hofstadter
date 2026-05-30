@@ -16,3 +16,19 @@ __pycache__/
 
 # Claude Code local settings
 .claude/
+
+# Input files
+input_*.txt
+semiclassical/input*.txt
+semiclassical/theta_*/
+
+# Test/validate/dev artifacts
+validate*.py
+hofstadter_testing.py
+semiclassical/test_*.py
+semiclassical/validate*.py
+dev_notes/
+
+# Editor backup/undo files
+*~
+*.un~
