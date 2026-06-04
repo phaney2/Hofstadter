@@ -249,8 +249,8 @@ def _do_calc_chi_hofstadter(inp):
     return {
         'E_list_K': elist_K / 1000,
         'E_list_Kp': elist_Kp / 1000,
-        'dChi_dE_K': dChi_K * 1e-20 * hbar**4,
-        'dChi_dE_Kp': dChi_Kp * 1e-20 * hbar**4,
+        'dChi_dE_K': dChi_K * 1e-20 * (hbar * 1e3)**4,
+        'dChi_dE_Kp': dChi_Kp * 1e-20 * (hbar * 1e3)**4,
     }
 
 
@@ -386,8 +386,8 @@ def do_calc_chi(filepath):
     return {
         'E_list_K': elist_K / 1000,
         'E_list_Kp': elist_Kp / 1000,
-        'dChi_dE_K': dChi_K * 1e-20 * hbar**4,
-        'dChi_dE_Kp': dChi_Kp * 1e-20 * hbar**4,
+        'dChi_dE_K': dChi_K * 1e-20 * (hbar * 1e3)**4,
+        'dChi_dE_Kp': dChi_Kp * 1e-20 * (hbar * 1e3)**4,
     }
 
 
