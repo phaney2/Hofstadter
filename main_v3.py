@@ -28,16 +28,25 @@ from hamiltonian import (get_interbilayerterms_K, get_interbilayerterms_Kp,
 # ---------------------------------------------------------------------------
 
 def _solve_kpoint_core(d, kpt):
-    """Solve both valleys at a single k-point. Returns (tek_K, tek_Kp)."""
+    """Solve both valleys at a single k-point.
+
+    Returns (tek_K, tek_Kp, wt_K, wt_Kp).
+    wt_K/wt_Kp are top-layer weights per eigenstate when layer_resolved=1,
+    otherwise None.
+    """
     kpts = kpt - d['M_mag']
     kx_val, ky_val = kpts
     pp, qq = d['pp'], d['qq']
     Lx, Ly = d['Lx'], d['Ly']
     gamma = d['gamma']
     mo = d['moire_offset']
+    layer_resolved = d.get('layer_resolved', 0)
+    dl = d.get('dim_MLG', 0)
 
     tek_K = None
     tek_Kp = None
+    wt_K = None
+    wt_Kp = None
 
     if 'K' in d['valley']:
         tphase1 = np.exp(1j * (pp / qq) * kx_val * Lx)
@@ -48,7 +57,12 @@ def _solve_kpoint_core(d, kpt):
 
         Htotal_K = d['H_base_K'].copy()
         Htotal_K[mo:, mo:] += d['v0_eye'] + V_pq + V_pq.T.conj()
-        tek_K = np.sort(linalg.eigvalsh(Htotal_K, overwrite_a=True, check_finite=False))
+
+        if layer_resolved:
+            tek_K, evecs = linalg.eigh(Htotal_K, overwrite_a=True, check_finite=False)
+            wt_K = np.sum(np.abs(evecs[:dl, :])**2, axis=0)
+        else:
+            tek_K = np.sort(linalg.eigvalsh(Htotal_K, overwrite_a=True, check_finite=False))
 
     if 'Kp' in d['valley']:
         tphase1 = np.exp(-1j * (pp / qq) * kx_val * Lx)
@@ -59,9 +73,14 @@ def _solve_kpoint_core(d, kpt):
 
         Htotal_Kp = d['H_base_Kp'].copy()
         Htotal_Kp[mo:, mo:] += d['v0_eye'] + V_pq + V_pq.T.conj()
-        tek_Kp = np.sort(linalg.eigvalsh(Htotal_Kp, overwrite_a=True, check_finite=False))
 
-    return tek_K, tek_Kp
+        if layer_resolved:
+            tek_Kp, evecs = linalg.eigh(Htotal_Kp, overwrite_a=True, check_finite=False)
+            wt_Kp = np.sum(np.abs(evecs[:dl, :])**2, axis=0)
+        else:
+            tek_Kp = np.sort(linalg.eigvalsh(Htotal_Kp, overwrite_a=True, check_finite=False))
+
+    return tek_K, tek_Kp, wt_K, wt_Kp
 
 
 _worker_shared = {}
@@ -73,8 +92,8 @@ def _init_kpoint_worker(shared):
 
 def _solve_kpoint(args):
     kc, kpt = args
-    tek_K, tek_Kp = _solve_kpoint_core(_worker_shared, kpt)
-    return kc, tek_K, tek_Kp
+    tek_K, tek_Kp, wt_K, wt_Kp = _solve_kpoint_core(_worker_shared, kpt)
+    return kc, tek_K, tek_Kp, wt_K, wt_Kp
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +152,9 @@ def do_calc(filepath):
     vF = d.get('vF', vF)
     isparallel = int(d.get('isparallel', 0))
     elist = np.asarray(d.get('elist', np.linspace(-300, 300, nebin)))
+    layer_resolved = int(d.get('layer_resolved', 0))
+    if layer_resolved and nlayers == 1:
+        layer_resolved = 0
 
     if calctype == 'spectrum':
         calctype = 'dos'
@@ -248,6 +270,9 @@ def do_calc(filepath):
 
     bands_K = np.zeros((Nk_tot, dim_total))
     bands_Kp = np.zeros((Nk_tot, dim_total))
+    if layer_resolved:
+        weights_K = np.zeros((Nk_tot, dim_total))
+        weights_Kp = np.zeros((Nk_tot, dim_total))
 
     # --- pre-scale and pack shared data for the k-point solver ---
     scale = 1000 / Q_E
@@ -259,6 +284,8 @@ def do_calc(filepath):
         'moire_offset': 0 if nlayers == 1 else dim_MLG,
         'valley': valley, 'M_mag': M_mag,
         'v0_eye': v0_eye_scaled,
+        'layer_resolved': layer_resolved,
+        'dim_MLG': dim_MLG,
     }
     if 'K' in valley:
         shared.update({
@@ -283,48 +310,86 @@ def do_calc(filepath):
         with Pool(processes=nworkers,
                   initializer=_init_kpoint_worker, initargs=(shared,)) as pool:
             results = pool.map(_solve_kpoint, tasks)
-        for kc, tek_K_row, tek_Kp_row in results:
+        for kc, tek_K_row, tek_Kp_row, wt_K_row, wt_Kp_row in results:
             if tek_K_row is not None:
                 bands_K[kc, :] = tek_K_row
             if tek_Kp_row is not None:
                 bands_Kp[kc, :] = tek_Kp_row
+            if layer_resolved:
+                if wt_K_row is not None:
+                    weights_K[kc, :] = wt_K_row
+                if wt_Kp_row is not None:
+                    weights_Kp[kc, :] = wt_Kp_row
     else:
         for kc in range(Nk_tot):
             print(f"  |>>        step {kc + 1} of {Nk_tot}")
-            tek_K_row, tek_Kp_row = _solve_kpoint_core(shared, kpoints[kc, :])
+            tek_K_row, tek_Kp_row, wt_K_row, wt_Kp_row = _solve_kpoint_core(shared, kpoints[kc, :])
             if tek_K_row is not None:
                 bands_K[kc, :] = tek_K_row
             if tek_Kp_row is not None:
                 bands_Kp[kc, :] = tek_Kp_row
+            if layer_resolved:
+                if wt_K_row is not None:
+                    weights_K[kc, :] = wt_K_row
+                if wt_Kp_row is not None:
+                    weights_Kp[kc, :] = wt_Kp_row
 
     print(" Done with the k loop")
 
     if calctype == 'ek':
-        return {'calctype': 'ek', 'params': inp,
-                'kpoints': kpoints,
-                'bands_K': bands_K, 'bands_Kp': bands_Kp}
+        result = {'calctype': 'ek', 'params': inp,
+                  'kpoints': kpoints,
+                  'bands_K': bands_K, 'bands_Kp': bands_Kp}
+        if layer_resolved:
+            result['weights_K'] = weights_K
+            result['weights_Kp'] = weights_Kp
+        return result
 
     # --- DOS: bin eigenvalues into energy histogram ---
     dos_weight = 1.0 / Nk_tot
     dos_K = np.zeros(len(elist))
     dos_Kp = np.zeros(len(elist))
+    if layer_resolved:
+        dos_K_top = np.zeros(len(elist))
+        dos_K_bottom = np.zeros(len(elist))
+        dos_Kp_top = np.zeros(len(elist))
+        dos_Kp_bottom = np.zeros(len(elist))
+
     for kc in range(Nk_tot):
         if 'K' in valley:
             tek = bands_K[kc, :]
-            in_range = tek[(tek > elist[0]) & (tek < elist[-1])]
+            mask = (tek > elist[0]) & (tek < elist[-1])
+            in_range = tek[mask]
             bins = np.argmin(np.abs(in_range[:, None] - elist[None, :]), axis=1)
             for b in bins:
                 dos_K[b] += dos_weight
+            if layer_resolved:
+                wt = weights_K[kc, mask]
+                for j, b in enumerate(bins):
+                    dos_K_top[b] += wt[j] * dos_weight
+                    dos_K_bottom[b] += (1 - wt[j]) * dos_weight
         if 'Kp' in valley:
             tek = bands_Kp[kc, :]
-            in_range = tek[(tek > elist[0]) & (tek < elist[-1])]
+            mask = (tek > elist[0]) & (tek < elist[-1])
+            in_range = tek[mask]
             bins = np.argmin(np.abs(in_range[:, None] - elist[None, :]), axis=1)
             for b in bins:
                 dos_Kp[b] += dos_weight
+            if layer_resolved:
+                wt = weights_Kp[kc, mask]
+                for j, b in enumerate(bins):
+                    dos_Kp_top[b] += wt[j] * dos_weight
+                    dos_Kp_bottom[b] += (1 - wt[j]) * dos_weight
 
-    return {'calctype': 'dos', 'params': inp,
-            'elist': elist,
-            'dos_K': dos_K, 'dos_Kp': dos_Kp}
+    result = {'calctype': 'dos', 'params': inp,
+              'elist': elist,
+              'dos_K': dos_K, 'dos_Kp': dos_Kp}
+    if layer_resolved:
+        result['dos_K_top'] = dos_K_top
+        result['dos_K_bottom'] = dos_K_bottom
+        result['dos_Kp_top'] = dos_Kp_top
+        result['dos_Kp_bottom'] = dos_Kp_bottom
+    return result
 
 
 # ---------------------------------------------------------------------------

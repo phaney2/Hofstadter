@@ -80,6 +80,7 @@ variables (e.g., `elist` can use `nebin`).
 | `LL_multiplier` | int | `6` | Controls Landau level cutoff N |
 | `Nmax` | int | `1000` | Hard cap on number of Landau levels |
 | `isparallel` | int | `1` | 0 = serial, 1 = parallel k-loop |
+| `layer_resolved` | int | `0` | 1 = compute per-eigenstate layer weights (bilayer only; uses `eigh` instead of `eigvalsh`) |
 
 #### Output control
 
@@ -149,6 +150,15 @@ Results are top-level variables.  Input parameters are stored in a
 
 where `Nk = nk1 * nk2` and `Nbands = nlayers * qq * (2*N + 1)`.
 
+With `layer_resolved = 1` (bilayer only), the output additionally includes:
+
+| Key | Shape | Units | Description |
+|---|---|---|---|
+| `weights_K` | (Nk, Nbands) | -- | Top-layer weight per eigenstate, K valley |
+| `weights_Kp` | (Nk, Nbands) | -- | Top-layer weight per eigenstate, K' valley |
+
+Bottom-layer weight is `1 - weights_K`.
+
 #### `calctype = 'dos'`
 
 | Key | Shape | Units | Description |
@@ -156,6 +166,17 @@ where `Nk = nk1 * nk2` and `Nbands = nlayers * qq * (2*N + 1)`.
 | `elist` | (nebin,) | meV | Energy grid |
 | `dos_K` | (nebin,) | counts | States per bin, K valley |
 | `dos_Kp` | (nebin,) | counts | States per bin, K' valley |
+
+With `layer_resolved = 1` (bilayer only), the output additionally includes:
+
+| Key | Shape | Units | Description |
+|---|---|---|---|
+| `dos_K_top` | (nebin,) | counts | Top-layer-weighted DOS, K valley |
+| `dos_K_bottom` | (nebin,) | counts | Bottom-layer-weighted DOS, K valley |
+| `dos_Kp_top` | (nebin,) | counts | Top-layer-weighted DOS, K' valley |
+| `dos_Kp_bottom` | (nebin,) | counts | Bottom-layer-weighted DOS, K' valley |
+
+`dos_K_top + dos_K_bottom = dos_K` (exact to machine precision).
 
 ### Zero-field output
 
