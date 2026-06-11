@@ -3,19 +3,12 @@ Hofstadter (magnetic-field) Hamiltonian and velocity operator for the
 semiclassical pipeline.
 
 Builds the magnetic Bloch Hamiltonian in a Landau level basis and
-constructs the velocity operator.  Two options (controlled by
-include_comm input flag):
+constructs the velocity operator v = (i/hbar) [A, H_base].
 
-  include_comm = 0 (default):  v = (1/hbar) dH/dk
-    Gauge-dependent — tied to the phase convention used for tphase1/2/3.
-    Gives integer Chern per k-mesh cell in the current (square) convention.
-
-  include_comm = 1:  v = (i/hbar) [A, H_base]
-    Gauge-invariant — same Berry curvature regardless of unit cell choice
-    (square vs triangular).  Precomputed once (k-independent) using the
-    BLG kinetic Hamiltonian H_base only.  The moire potential V(R) is
-    local in position so [R, V] = 0, which means V contributes nothing
-    to the velocity: dV/dk + i[A, V] = 0 identically.
+The moire potential V(R) is local in position so [R, V] = 0, which
+means V contributes nothing to the velocity: dV/dk + i[A, V] = 0
+identically.  The velocity is therefore determined entirely by the
+k-independent BLG kinetic Hamiltonian H_base, precomputed once.
 
 All outputs are in eV / Angstrom units to match the zero-field
 semiclassical conventions.
@@ -222,26 +215,19 @@ def build_hofstadter_setup(inp):
     print(f"  target_idx range: {target_idx[0]}..{target_idx[-1]}")
     print(f"  remote_ind range: {remote_ind[0]}..{remote_ind[-1]}")
 
-    include_comm = int(inp.get('include_comm', 0))
-
-    # --- Precompute gauge-invariant velocity when include_comm=1 ---
-    # v = (i/hbar)[A, H_base] — k-independent, no LL truncation artifacts.
-    # The moire potential V(R) is local in position so [R, V] = 0, which
-    # means its contribution to velocity vanishes identically.
-    precomputed_V = {}
-    if include_comm:
-        precomputed_V['Vx_K'] = (1j * (Ax_full_K_Ang @ H_base_K_eV
-                                        - H_base_K_eV @ Ax_full_K_Ang)
-                                 / HBAR_EV)
-        precomputed_V['Vy_K'] = (1j * (Ay_full_K_Ang @ H_base_K_eV
-                                        - H_base_K_eV @ Ay_full_K_Ang)
-                                 / HBAR_EV)
-        precomputed_V['Vx_Kp'] = (1j * (Ax_full_Kp_Ang @ H_base_Kp_eV
-                                         - H_base_Kp_eV @ Ax_full_Kp_Ang)
-                                  / HBAR_EV)
-        precomputed_V['Vy_Kp'] = (1j * (Ay_full_Kp_Ang @ H_base_Kp_eV
-                                         - H_base_Kp_eV @ Ay_full_Kp_Ang)
-                                  / HBAR_EV)
+    # --- Precompute velocity: v = (i/hbar)[A, H_base] ---
+    Vx_K = (1j * (Ax_full_K_Ang @ H_base_K_eV
+                   - H_base_K_eV @ Ax_full_K_Ang)
+            / HBAR_EV)
+    Vy_K = (1j * (Ay_full_K_Ang @ H_base_K_eV
+                   - H_base_K_eV @ Ay_full_K_Ang)
+            / HBAR_EV)
+    Vx_Kp = (1j * (Ax_full_Kp_Ang @ H_base_Kp_eV
+                    - H_base_Kp_eV @ Ax_full_Kp_Ang)
+             / HBAR_EV)
+    Vy_Kp = (1j * (Ay_full_Kp_Ang @ H_base_Kp_eV
+                    - H_base_Kp_eV @ Ay_full_Kp_Ang)
+             / HBAR_EV)
 
     setup = {
         'pp': pp, 'qq': qq, 'nlayers': nlayers, 'gamma': gamma,
@@ -257,6 +243,8 @@ def build_hofstadter_setup(inp):
         'Ax_K': Ax_full_K_Ang, 'Ay_K': Ay_full_K_Ang,
         'Ax_Kp': Ax_full_Kp_Ang, 'Ay_Kp': Ay_full_Kp_Ang,
         'v0_eye': v0_eye_eV,
+        'Vx_K': Vx_K, 'Vy_K': Vy_K,
+        'Vx_Kp': Vx_Kp, 'Vy_Kp': Vy_Kp,
         'kpoints': kpoints_Ang,
         'kpoints_raw': kpoints,
         'nk1': nk1, 'nk2': nk2,
@@ -265,8 +253,6 @@ def build_hofstadter_setup(inp):
         'remote_ind': remote_ind,
         'num_bands': num_bands,
         'B': B,
-        'include_comm': include_comm,
-        **precomputed_V,
     }
     return setup
 
@@ -280,7 +266,6 @@ def assemble_H_V_K(kpt, setup):
     gamma = setup['gamma']
     mo = setup['moire_offset']
     M_mag = setup['M_mag_Ang']
-    dim = setup['dim_total']
 
     kpts = kpt - M_mag
     kx, ky = kpts
@@ -301,37 +286,7 @@ def assemble_H_V_K(kpt, setup):
     H = setup['H_base_K'].copy()
     H[mo:, mo:] += setup['v0_eye'] + V_pq + V_pq.T.conj()
 
-    # --- Velocity (Ang/s) ---
-    if setup.get('include_comm', 0):
-        # v = (i/hbar)[A, H_base] — precomputed, k-independent.
-        Vx = setup['Vx_K']
-        Vy = setup['Vy_K']
-    else:
-        # v = (1/hbar) dH/dk — gauge-dependent.
-        vx_tp1 = (1j * pp_over_qq * Lx) * tphase1
-        vx_tp2 = (-1j * pp_over_qq * Lx / 2) * tphase2
-        vx_tp3 = (-1j * pp_over_qq * Lx / 2) * tphase3
-
-        vy_tp1 = 0.0
-        vy_tp2 = (1j * pp_over_qq * Ly) * tphase2
-        vy_tp3 = (-1j * pp_over_qq * Ly) * tphase3
-
-        vx_tmp = (gamma * vx_tp1 * setup['term1_K']
-                  + vx_tp2 * setup['term2_K']
-                  + vx_tp3 * setup['term3_K'])
-        vy_tmp = (gamma * vy_tp1 * setup['term1_K']
-                  + vy_tp2 * setup['term2_K']
-                  + vy_tp3 * setup['term3_K'])
-
-        Hdx = np.zeros((dim, dim), dtype=complex)
-        Hdy = np.zeros((dim, dim), dtype=complex)
-        Hdx[mo:, mo:] = vx_tmp + vx_tmp.T.conj()
-        Hdy[mo:, mo:] = vy_tmp + vy_tmp.T.conj()
-
-        Vx = Hdx / HBAR_EV
-        Vy = Hdy / HBAR_EV
-
-    return H, Vx, Vy
+    return H, setup['Vx_K'], setup['Vy_K']
 
 
 def assemble_H_V_Kp(kpt, setup):
@@ -343,7 +298,6 @@ def assemble_H_V_Kp(kpt, setup):
     gamma = setup['gamma']
     mo = setup['moire_offset']
     M_mag = setup['M_mag_Ang']
-    dim = setup['dim_total']
 
     kpts = kpt - M_mag
     kx, ky = kpts
@@ -364,34 +318,4 @@ def assemble_H_V_Kp(kpt, setup):
     H = setup['H_base_Kp'].copy()
     H[mo:, mo:] += setup['v0_eye'] + V_pq + V_pq.T.conj()
 
-    # --- Velocity (Ang/s) ---
-    if setup.get('include_comm', 0):
-        # v = (i/hbar)[A, H_base] — precomputed, k-independent.
-        Vx = setup['Vx_Kp']
-        Vy = setup['Vy_Kp']
-    else:
-        # v = (1/hbar) dH/dk — gauge-dependent.
-        vx_tp1 = (-1j * pp_over_qq * Lx) * tphase1
-        vx_tp2 = (1j * pp_over_qq * Lx / 2) * tphase2
-        vx_tp3 = (1j * pp_over_qq * Lx / 2) * tphase3
-
-        vy_tp1 = 0.0
-        vy_tp2 = (-1j * pp_over_qq * Ly) * tphase2
-        vy_tp3 = (1j * pp_over_qq * Ly) * tphase3
-
-        vx_tmp = (gamma * vx_tp1 * setup['term1_Kp']
-                  + vx_tp2 * setup['term2_Kp']
-                  + vx_tp3 * setup['term3_Kp'])
-        vy_tmp = (gamma * vy_tp1 * setup['term1_Kp']
-                  + vy_tp2 * setup['term2_Kp']
-                  + vy_tp3 * setup['term3_Kp'])
-
-        Hdx = np.zeros((dim, dim), dtype=complex)
-        Hdy = np.zeros((dim, dim), dtype=complex)
-        Hdx[mo:, mo:] = vx_tmp + vx_tmp.T.conj()
-        Hdy[mo:, mo:] = vy_tmp + vy_tmp.T.conj()
-
-        Vx = Hdx / HBAR_EV
-        Vy = Hdy / HBAR_EV
-
-    return H, Vx, Vy
+    return H, setup['Vx_Kp'], setup['Vy_Kp']

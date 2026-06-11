@@ -190,15 +190,9 @@ It avoids LL truncation artifacts that arise when computing `dV/dk` and
 `[A, V]` separately in a finite basis (the identity `dV/dk = -i[A,V]`
 requires completeness of the LL basis, which fails near the cutoff N).
 
-Two modes are available via `include_comm`:
-
-  - `include_comm = 0` (default): `v = (1/hbar) dH/dk`.
-    Gauge-dependent — gives integer Chern per k-mesh cell in the
-    square phase convention.
-  - `include_comm = 1`: `v = (i/hbar) [A, H_base]`.
-    Gauge-invariant — same Berry curvature regardless of unit cell
-    choice (square vs triangular).  Chern per mesh cell = 1/pp;
-    integer over the full magnetic BZ.
+The velocity is gauge-invariant — same Berry curvature regardless of
+unit cell choice (square vs triangular).  Chern per mesh cell = 1/pp;
+integer over the full magnetic BZ.
 
 ### Hofstadter mode — magnetic flux convention
 
@@ -392,8 +386,7 @@ Implemented in `hamiltonian.py` as `get_berry_connection_K/Kp`.
 |---|---|---|
 | H, H_base, terms | eV | Converted from Joules via /Q_E |
 | Ax, Ay | Angstrom | Converted from meters via ×1e10 |
-| dH/dk (Hdx, Hdy) | eV·Ang | Phase derivative × term matrices (include_comm=0 only) |
-| Velocity (Vx, Vy) | Ang/s | i[A,H_base]/hbar (include_comm=1) or dH/dk/hbar (include_comm=0) |
+| Velocity (Vx, Vy) | Ang/s | i[A,H_base]/hbar — precomputed, k-independent |
 | Berry curvature Oz | Ang^2 | From Kubo formula with hbar^2 prefactor |
 | kpoints | Ang^-1 | Converted from m^-1 via /1e10 |
 | vol_M | m^2 | Real-space magnetic unit cell area |
