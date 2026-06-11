@@ -167,25 +167,38 @@ Lz(n) =      hbar^2 * sum_m  den * prod / denom   [eV*Ang^2 internally]
 Diagonal terms (n=m) contribute zero because vx(n,n) and vy(n,n) are
 real for Hermitian V operators.
 
-### Hofstadter mode — velocity operator for Berry curvature
+### Hofstadter mode — velocity operator
 
-**IMPORTANT**: In the LL basis, the physical velocity has two terms:
+The physical velocity in the LL basis is `v = (i/hbar) [R, H]` where
+R is the position operator.  In the magnetic Bloch representation,
+`R = i d/dk + A` where A is the LL Berry connection, giving:
 ```
-v = (1/hbar) * (dH/dk - i[A, H])
+v = (1/hbar) * (dH/dk + i[A, H])
 ```
-where A is the LL Berry connection (ladder operator matrix elements).
-However, for **Berry curvature**, only the `dH/dk` term should be used.
-The `[A, H]` commutator is part of the physical current operator but
-does NOT contribute to the gauge-invariant Berry curvature.
 
-This was confirmed by comparing the Kubo formula against gauge-invariant
-plaquette Berry curvature (wavefunction overlaps around a small k-space
-loop). The dH/dk-only Kubo formula matches the plaquette to ~1e-4
-relative, while including the `[A, H]` term destroys the agreement.
+The moire potential V_moire(R) is a local function of position, so
+`[R, V_moire] = 0`.  This means `dV/dk + i[A, V] = 0` identically —
+the moire potential contributes nothing to the velocity.  Since H_base
+(the BLG kinetic Hamiltonian) is k-independent, `dH_base/dk = 0`, and
+the velocity reduces to:
+```
+v = (i/hbar) [A, H_base]
+```
 
-The Berry connection matrices (`Ax`, `Ay`) are still computed and stored
-in the setup dict because they may be needed for the orbital moment `Lz`
-(where the physical velocity enters). This needs verification.
+This is k-independent and precomputed once in `build_hofstadter_setup`.
+It avoids LL truncation artifacts that arise when computing `dV/dk` and
+`[A, V]` separately in a finite basis (the identity `dV/dk = -i[A,V]`
+requires completeness of the LL basis, which fails near the cutoff N).
+
+Two modes are available via `include_comm`:
+
+  - `include_comm = 0` (default): `v = (1/hbar) dH/dk`.
+    Gauge-dependent — gives integer Chern per k-mesh cell in the
+    square phase convention.
+  - `include_comm = 1`: `v = (i/hbar) [A, H_base]`.
+    Gauge-invariant — same Berry curvature regardless of unit cell
+    choice (square vs triangular).  Chern per mesh cell = 1/pp;
+    integer over the full magnetic BZ.
 
 ### Hofstadter mode — magnetic flux convention
 
@@ -379,8 +392,8 @@ Implemented in `hamiltonian.py` as `get_berry_connection_K/Kp`.
 |---|---|---|
 | H, H_base, terms | eV | Converted from Joules via /Q_E |
 | Ax, Ay | Angstrom | Converted from meters via ×1e10 |
-| dH/dk (Hdx, Hdy) | eV·Ang | Phase derivative × term matrices |
-| Velocity (Vx, Vy) | Ang/s | dH/dk / hbar (eV·Ang / eV·s) |
+| dH/dk (Hdx, Hdy) | eV·Ang | Phase derivative × term matrices (include_comm=0 only) |
+| Velocity (Vx, Vy) | Ang/s | i[A,H_base]/hbar (include_comm=1) or dH/dk/hbar (include_comm=0) |
 | Berry curvature Oz | Ang^2 | From Kubo formula with hbar^2 prefactor |
 | kpoints | Ang^-1 | Converted from m^-1 via /1e10 |
 | vol_M | m^2 | Real-space magnetic unit cell area |

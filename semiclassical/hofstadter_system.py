@@ -10,10 +10,12 @@ include_comm input flag):
     Gauge-dependent — tied to the phase convention used for tphase1/2/3.
     Gives integer Chern per k-mesh cell in the current (square) convention.
 
-  include_comm = 1:  v = (1/hbar)(dH/dk - i[A, H])
+  include_comm = 1:  v = (i/hbar) [A, H_base]
     Gauge-invariant — same Berry curvature regardless of unit cell choice
-    (square vs triangular).  Chern per mesh cell = 1/pp; integer over
-    the full magnetic BZ.
+    (square vs triangular).  Precomputed once (k-independent) using the
+    BLG kinetic Hamiltonian H_base only.  The moire potential V(R) is
+    local in position so [R, V] = 0, which means V contributes nothing
+    to the velocity: dV/dk + i[A, V] = 0 identically.
 
 All outputs are in eV / Angstrom units to match the zero-field
 semiclassical conventions.
@@ -222,6 +224,25 @@ def build_hofstadter_setup(inp):
 
     include_comm = int(inp.get('include_comm', 0))
 
+    # --- Precompute gauge-invariant velocity when include_comm=1 ---
+    # v = (i/hbar)[A, H_base] — k-independent, no LL truncation artifacts.
+    # The moire potential V(R) is local in position so [R, V] = 0, which
+    # means its contribution to velocity vanishes identically.
+    precomputed_V = {}
+    if include_comm:
+        precomputed_V['Vx_K'] = (1j * (Ax_full_K_Ang @ H_base_K_eV
+                                        - H_base_K_eV @ Ax_full_K_Ang)
+                                 / HBAR_EV)
+        precomputed_V['Vy_K'] = (1j * (Ay_full_K_Ang @ H_base_K_eV
+                                        - H_base_K_eV @ Ay_full_K_Ang)
+                                 / HBAR_EV)
+        precomputed_V['Vx_Kp'] = (1j * (Ax_full_Kp_Ang @ H_base_Kp_eV
+                                         - H_base_Kp_eV @ Ax_full_Kp_Ang)
+                                  / HBAR_EV)
+        precomputed_V['Vy_Kp'] = (1j * (Ay_full_Kp_Ang @ H_base_Kp_eV
+                                         - H_base_Kp_eV @ Ay_full_Kp_Ang)
+                                  / HBAR_EV)
+
     setup = {
         'pp': pp, 'qq': qq, 'nlayers': nlayers, 'gamma': gamma,
         'Lx_Ang': Lx_Ang, 'Ly_Ang': Ly_Ang,
@@ -245,6 +266,7 @@ def build_hofstadter_setup(inp):
         'num_bands': num_bands,
         'B': B,
         'include_comm': include_comm,
+        **precomputed_V,
     }
     return setup
 
@@ -279,43 +301,33 @@ def assemble_H_V_K(kpt, setup):
     H = setup['H_base_K'].copy()
     H[mo:, mo:] += setup['v0_eye'] + V_pq + V_pq.T.conj()
 
-    # --- dH/dk (eV * Ang) ---
-    vx_tp1 = (1j * pp_over_qq * Lx) * tphase1
-    vx_tp2 = (-1j * pp_over_qq * Lx / 2) * tphase2
-    vx_tp3 = (-1j * pp_over_qq * Lx / 2) * tphase3
-
-    vy_tp1 = 0.0
-    vy_tp2 = (1j * pp_over_qq * Ly) * tphase2
-    vy_tp3 = (-1j * pp_over_qq * Ly) * tphase3
-
-    vx_tmp = (gamma * vx_tp1 * setup['term1_K']
-              + vx_tp2 * setup['term2_K']
-              + vx_tp3 * setup['term3_K'])
-    vy_tmp = (gamma * vy_tp1 * setup['term1_K']
-              + vy_tp2 * setup['term2_K']
-              + vy_tp3 * setup['term3_K'])
-
-    Hdx = np.zeros((dim, dim), dtype=complex)
-    Hdy = np.zeros((dim, dim), dtype=complex)
-    Hdx[mo:, mo:] = vx_tmp + vx_tmp.T.conj()
-    Hdy[mo:, mo:] = vy_tmp + vy_tmp.T.conj()
-
     # --- Velocity (Ang/s) ---
-    # Two options controlled by setup['include_comm']:
-    #   0: v = (1/hbar) dH/dk
-    #      Gauge-dependent — gives integer Chern per mesh cell in the
-    #      square phase convention.  Matches plaquette Berry curvature
-    #      (which is also gauge-dependent in the same way).
-    #   1: v = (1/hbar)(dH/dk - i[A, H])
-    #      Gauge-invariant — gives the same Berry curvature regardless
-    #      of phase convention (square vs triangular unit cell).
-    #      Chern per mesh cell = 1/pp; integer over the full MBZ.
     if setup.get('include_comm', 0):
-        Ax = setup['Ax_K']
-        Ay = setup['Ay_K']
-        Vx = (Hdx - 1j * (Ax @ H - H @ Ax)) / HBAR_EV
-        Vy = (Hdy - 1j * (Ay @ H - H @ Ay)) / HBAR_EV
+        # v = (i/hbar)[A, H_base] — precomputed, k-independent.
+        Vx = setup['Vx_K']
+        Vy = setup['Vy_K']
     else:
+        # v = (1/hbar) dH/dk — gauge-dependent.
+        vx_tp1 = (1j * pp_over_qq * Lx) * tphase1
+        vx_tp2 = (-1j * pp_over_qq * Lx / 2) * tphase2
+        vx_tp3 = (-1j * pp_over_qq * Lx / 2) * tphase3
+
+        vy_tp1 = 0.0
+        vy_tp2 = (1j * pp_over_qq * Ly) * tphase2
+        vy_tp3 = (-1j * pp_over_qq * Ly) * tphase3
+
+        vx_tmp = (gamma * vx_tp1 * setup['term1_K']
+                  + vx_tp2 * setup['term2_K']
+                  + vx_tp3 * setup['term3_K'])
+        vy_tmp = (gamma * vy_tp1 * setup['term1_K']
+                  + vy_tp2 * setup['term2_K']
+                  + vy_tp3 * setup['term3_K'])
+
+        Hdx = np.zeros((dim, dim), dtype=complex)
+        Hdy = np.zeros((dim, dim), dtype=complex)
+        Hdx[mo:, mo:] = vx_tmp + vx_tmp.T.conj()
+        Hdy[mo:, mo:] = vy_tmp + vy_tmp.T.conj()
+
         Vx = Hdx / HBAR_EV
         Vy = Hdy / HBAR_EV
 
@@ -352,34 +364,33 @@ def assemble_H_V_Kp(kpt, setup):
     H = setup['H_base_Kp'].copy()
     H[mo:, mo:] += setup['v0_eye'] + V_pq + V_pq.T.conj()
 
-    # --- dH/dk (eV * Ang, K' signs) ---
-    vx_tp1 = (-1j * pp_over_qq * Lx) * tphase1
-    vx_tp2 = (1j * pp_over_qq * Lx / 2) * tphase2
-    vx_tp3 = (1j * pp_over_qq * Lx / 2) * tphase3
-
-    vy_tp1 = 0.0
-    vy_tp2 = (-1j * pp_over_qq * Ly) * tphase2
-    vy_tp3 = (1j * pp_over_qq * Ly) * tphase3
-
-    vx_tmp = (gamma * vx_tp1 * setup['term1_Kp']
-              + vx_tp2 * setup['term2_Kp']
-              + vx_tp3 * setup['term3_Kp'])
-    vy_tmp = (gamma * vy_tp1 * setup['term1_Kp']
-              + vy_tp2 * setup['term2_Kp']
-              + vy_tp3 * setup['term3_Kp'])
-
-    Hdx = np.zeros((dim, dim), dtype=complex)
-    Hdy = np.zeros((dim, dim), dtype=complex)
-    Hdx[mo:, mo:] = vx_tmp + vx_tmp.T.conj()
-    Hdy[mo:, mo:] = vy_tmp + vy_tmp.T.conj()
-
     # --- Velocity (Ang/s) ---
     if setup.get('include_comm', 0):
-        Ax = setup['Ax_Kp']
-        Ay = setup['Ay_Kp']
-        Vx = (Hdx - 1j * (Ax @ H - H @ Ax)) / HBAR_EV
-        Vy = (Hdy - 1j * (Ay @ H - H @ Ay)) / HBAR_EV
+        # v = (i/hbar)[A, H_base] — precomputed, k-independent.
+        Vx = setup['Vx_Kp']
+        Vy = setup['Vy_Kp']
     else:
+        # v = (1/hbar) dH/dk — gauge-dependent.
+        vx_tp1 = (-1j * pp_over_qq * Lx) * tphase1
+        vx_tp2 = (1j * pp_over_qq * Lx / 2) * tphase2
+        vx_tp3 = (1j * pp_over_qq * Lx / 2) * tphase3
+
+        vy_tp1 = 0.0
+        vy_tp2 = (-1j * pp_over_qq * Ly) * tphase2
+        vy_tp3 = (1j * pp_over_qq * Ly) * tphase3
+
+        vx_tmp = (gamma * vx_tp1 * setup['term1_Kp']
+                  + vx_tp2 * setup['term2_Kp']
+                  + vx_tp3 * setup['term3_Kp'])
+        vy_tmp = (gamma * vy_tp1 * setup['term1_Kp']
+                  + vy_tp2 * setup['term2_Kp']
+                  + vy_tp3 * setup['term3_Kp'])
+
+        Hdx = np.zeros((dim, dim), dtype=complex)
+        Hdy = np.zeros((dim, dim), dtype=complex)
+        Hdx[mo:, mo:] = vx_tmp + vx_tmp.T.conj()
+        Hdy[mo:, mo:] = vy_tmp + vy_tmp.T.conj()
+
         Vx = Hdx / HBAR_EV
         Vy = Hdy / HBAR_EV
 
