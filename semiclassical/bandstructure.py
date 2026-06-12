@@ -362,14 +362,28 @@ def _do_calc_hofstadter(inp):
                  for kc in range(Nk_tot)]
 
     print(f"  Calculating over {Nk_tot} k-points...")
+    results = []
+    next_pct = 5
     if ispar:
         with Pool(nprocs, initializer=_init_hofstadter_worker,
                   initargs=(setup,)) as pool:
-            results = list(pool.imap_unordered(_kpoint_worker_hofstadter, args_list))
+            for i, r in enumerate(pool.imap_unordered(
+                    _kpoint_worker_hofstadter, args_list)):
+                results.append(r)
+                pct = 100 * (i + 1) // Nk_tot
+                if pct >= next_pct:
+                    print(f"\r  {pct}%", end="", flush=True)
+                    next_pct = (pct // 5 + 1) * 5
     else:
         global _hofstadter_shared
         _hofstadter_shared = setup
-        results = [_kpoint_worker_hofstadter(a) for a in args_list]
+        for i, a in enumerate(args_list):
+            results.append(_kpoint_worker_hofstadter(a))
+            pct = 100 * (i + 1) // Nk_tot
+            if pct >= next_pct:
+                print(f"\r  {pct}%", end="", flush=True)
+                next_pct = (pct // 5 + 1) * 5
+    print()
 
     E_K  = np.zeros((num_bands, Nk_tot))
     E_Kp = np.zeros((num_bands, Nk_tot))
@@ -514,11 +528,25 @@ def do_calc(filepath):
 
     # --- Run k-loop ---
     print(f"  Calculating over {Nk_tot} k-points...")
+    results = []
+    next_pct = 5
     if ispar:
         with Pool(nprocs) as pool:
-            results = list(pool.imap_unordered(_kpoint_worker, args_list))
+            for i, r in enumerate(pool.imap_unordered(
+                    _kpoint_worker, args_list)):
+                results.append(r)
+                pct = 100 * (i + 1) // Nk_tot
+                if pct >= next_pct:
+                    print(f"\r  {pct}%", end="", flush=True)
+                    next_pct = (pct // 5 + 1) * 5
     else:
-        results = [_kpoint_worker(a) for a in args_list]
+        for i, a in enumerate(args_list):
+            results.append(_kpoint_worker(a))
+            pct = 100 * (i + 1) // Nk_tot
+            if pct >= next_pct:
+                print(f"\r  {pct}%", end="", flush=True)
+                next_pct = (pct // 5 + 1) * 5
+    print()
 
     # --- Collect results ---
     E_K  = np.zeros((num_bands, Nk_tot))

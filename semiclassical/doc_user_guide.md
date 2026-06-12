@@ -314,6 +314,12 @@ Returns a dict `{'S': LL_S, 'SB': LL_SB, 'SBM': LL_SBM}` where each
 value is (nB, nmax+1).  If `dChi_dE` is provided, adds `'SBMC'`.
 Returns `None` if the band has no closed orbits.
 
+## Progress output
+
+The band structure k-loop prints progress at every 5% completion
+(both serial and parallel modes).  The percentage is updated in-place
+on a single line via carriage return.
+
 ## Running on a cluster
 
 ```bash
