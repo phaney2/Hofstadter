@@ -209,7 +209,21 @@ Determined by the `outputfile` parameter in the input file.
 If not specified, defaults to `electronic_structure_data_{nk1}.mat`.
 Use `.mat` extension for MATLAB-compatible output, `.npz` for numpy.
 
-### Saved variables
+### Output structure (`.mat` files)
+
+Output is nested into two top-level structs:
+
+- `results` — all computed data (eigenvalues, Berry curvature, etc.)
+- `params` — all input parameters as parsed from the input file
+
+Access in MATLAB: `d = load('file.mat'); d.results.E_K`,
+`d.params.nk1`.  Access in Python:
+`d = loadmat('file.mat'); d['results']['E_K'][0,0]`.
+
+When loading prior-stage output for downstream stages (e.g., isoenergy
+reading bandstructure output), the code auto-unwraps the nested format.
+
+### Saved variables (inside `results`)
 
 | Variable      | Shape               | Units   | Description |
 |---|---|---|---|

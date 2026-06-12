@@ -319,8 +319,7 @@ def _save_result(result, outfile):
 
     if outfile.endswith('.mat'):
         from scipy.io import savemat
-        data['params'] = params
-        savemat(outfile, data)
+        savemat(outfile, {'results': data, 'params': params})
     else:
         for k, v in params.items():
             data[f'input_{k}'] = np.asarray(v)

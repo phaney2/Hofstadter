@@ -135,8 +135,14 @@ prefix (e.g., `input_pp`, `input_g0`).
 
 ### `.mat` format
 
-Results are top-level variables.  Input parameters are stored in a
-`params` struct (e.g., `params.pp`, `params.g0`).
+Output is nested into two top-level structs:
+
+- `results` — all computed data (eigenvalues, k-points, etc.)
+- `params` — all input parameters as parsed from the input file
+
+Access in MATLAB: `d = load('file.mat'); d.results.bands_K`,
+`d.params.pp`.  Access in Python:
+`d = loadmat('file.mat'); d['results']['bands_K'][0,0]`.
 
 ### Result keys by calctype
 

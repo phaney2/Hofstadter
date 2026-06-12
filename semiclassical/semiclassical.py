@@ -22,33 +22,45 @@ from bandstructure import do_calc
 # Data I/O
 # ---------------------------------------------------------------------------
 
+def _unpack_mat(raw):
+    data = {}
+    for k, v in raw.items():
+        if k.startswith('__'):
+            continue
+        if isinstance(v, np.ndarray):
+            if v.ndim == 2 and v.shape == (1, 1):
+                data[k] = v.item()
+            elif v.ndim == 2 and v.shape[0] == 1:
+                data[k] = v.ravel()
+            else:
+                data[k] = v
+        else:
+            data[k] = v
+    return data
+
+
 def load_data(filepath):
     if filepath.endswith('.mat'):
         from scipy.io import loadmat
         raw = loadmat(filepath)
-        data = {}
-        for k, v in raw.items():
-            if k.startswith('__'):
-                continue
-            if isinstance(v, np.ndarray):
-                if v.ndim == 2 and v.shape == (1, 1):
-                    data[k] = v.item()
-                elif v.ndim == 2 and v.shape[0] == 1:
-                    data[k] = v.ravel()
-                else:
-                    data[k] = v
-            else:
-                data[k] = v
+        data = _unpack_mat(raw)
+        if 'results' in data and hasattr(data['results'], 'dtype'):
+            data = _unpack_mat(
+                {n: data['results'][n][0, 0]
+                 for n in data['results'].dtype.names})
         return data
     else:
         return dict(np.load(filepath))
 
 
-def save_result(result, outfile):
+def save_result(result, outfile, params=None):
     data = {k: v for k, v in result.items()}
     if outfile.endswith('.mat'):
         from scipy.io import savemat
-        savemat(outfile, data)
+        if params is not None:
+            savemat(outfile, {'results': data, 'params': params})
+        else:
+            savemat(outfile, data)
     else:
         np.savez(outfile, **data)
     print(f"  Saved to {outfile}")
@@ -338,21 +350,21 @@ def main(fpath=None):
         result = run_bandstructure(inp, fpath)
         outfile = inp.get('outputfile',
                           f'electronic_structure_data_{int(inp["nk1"])}.mat')
-        save_result(result, outfile)
+        save_result(result, outfile, inp)
 
     elif calctype == 'isoenergy':
         print("=== Stage: isoenergy ===")
         bs_data = load_data(inp['inputdata'])
         result = run_isoenergy(inp, bs_data)
         outfile = inp.get('outputfile', 'isoenergy_data.mat')
-        save_result(result, outfile)
+        save_result(result, outfile, inp)
 
     elif calctype == 'onsager':
         print("=== Stage: onsager ===")
         iso_data = load_data(inp['inputdata'])
         result = run_onsager(inp, iso_data)
         outfile = inp.get('outputfile', 'onsager_data.mat')
-        save_result(result, outfile)
+        save_result(result, outfile, inp)
 
     elif calctype == 'onsager_bfield':
         print("=== Stage: onsager_bfield ===")
@@ -363,7 +375,7 @@ def main(fpath=None):
         detail_keys = {k for k in result
                        if k.startswith(('area_', 'enclosedBC_', 'E_levels_'))}
         fan_result = {k: v for k, v in result.items() if k not in detail_keys}
-        save_result(fan_result, outfile)
+        save_result(fan_result, outfile, inp)
 
         if detail_keys:
             detail_result = {k: result[k] for k in detail_keys}
@@ -379,18 +391,18 @@ def main(fpath=None):
         ext = '.mat'
         bs_outfile = inp.get('outputfile',
                              f'electronic_structure_data_{nk_tag}{ext}')
-        save_result(bs_result, bs_outfile)
+        save_result(bs_result, bs_outfile, inp)
 
         if 'nE' in inp:
             iso_result = run_isoenergy(inp, bs_result)
             base, ext = os.path.splitext(bs_outfile)
             iso_outfile = f'{base}_isoenergy{ext}'
-            save_result(iso_result, iso_outfile)
+            save_result(iso_result, iso_outfile, inp)
 
             if 'Blist' in inp:
                 ons_result = run_onsager(inp, iso_result)
                 ons_outfile = f'{base}_onsager{ext}'
-                save_result(ons_result, ons_outfile)
+                save_result(ons_result, ons_outfile, inp)
 
     else:
         raise ValueError(

@@ -5,8 +5,8 @@ on hBN.  Three calculation modes:
 
 1. **Hofstadter** (`main_v3.py`): Magnetic Bloch bands in a Landau-level
    basis at rational flux qq/pp.  Uses corrected moire coupling matrices
-   (order=[3,1,2], conj=1, psi_conj=1) and doubled guiding-center chain
-   (Nq=2*qq).  Legacy driver `main_v2.py` is kept for reference.
+   (order=[3,1,2], conj=1, psi_conj=1) and doubled real-space unit cell
+   (Nq=qq).  Legacy driver `main_v2.py` is kept for reference.
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
    expansion along a k-path through the moire BZ.
 3. **Semiclassical** (`semiclassical/`): Full BZ k-mesh band structure
@@ -20,7 +20,7 @@ on hBN.  Three calculation modes:
 
 | File | Purpose |
 |---|---|
-| `main_v3.py` | **Primary** Hofstadter engine: corrected moire coupling, chain doubling (Nq=2*qq) |
+| `main_v3.py` | **Primary** Hofstadter engine: corrected moire coupling, doubled unit cell (Nq=qq) |
 | `main_v2.py` | Legacy Hofstadter engine (Nq=qq, old T-matrix conventions) |
 | `hofstadter_testing.py` | Convention explorer: sweep order/conj/psi flags to find correct T matrices |
 | `hamiltonian.py` | All Hamiltonian construction (intralayer, intermonolayer, interbilayer, testing variants) |
@@ -65,6 +65,11 @@ than re-parsing the source.
 
 ## Code conventions
 
+- **Output format**: All `.mat` output files use a nested structure with
+  two top-level structs: `results` (computed data) and `params` (all
+  input parameters as parsed).  The semiclassical `load_data()` function
+  auto-unwraps this format so downstream stages can access result keys
+  directly.
 - The function return contract for `do_calc` (in `main_v3.py` / `main_v2.py`)
   is a dict whose keys depend on `calctype`. New calctypes add new key sets.
 - **Hofstadter units**: Input parameters are in meV; converted to Joules
@@ -120,8 +125,8 @@ should match to machine precision (~1e-11 meV).
 
 ### Hofstadter
 The default `input_test.txt` uses `pp=1, qq=1` (strong field, small
-matrices).  With main_v3 (Nq=2*qq), matrix dimensions are doubled
-relative to main_v2 for the same flux.
+matrices).  main_v3 uses Nq=qq (same chain size as main_v2) but with a
+doubled real-space unit cell and corrected T-matrix conventions.
 
 ### Zero-field
 The default `input_zerofield.txt` uses `NQ=7` (49 Q-vectors, dim=196 for
@@ -165,6 +170,26 @@ differences — see below.
 
 5. **`include_chi` flag**: Set `include_chi = 0` in the input file to
    skip the expensive Fukuyama susceptibility loop. Defaults to 1.
+
+## Documentation requirements
+
+**Any change to `.py` source files MUST include corresponding updates to
+the documentation.** This is mandatory, not optional.
+
+- Changes to Hamiltonian construction, basis, dimensions, or physics:
+  update `doc_technical.md`
+- Changes to input parameters, output format, or usage: update
+  `doc_user_guide.md`
+- Changes to file roles, code layout, or conventions: update this
+  `CLAUDE.md`
+- Changes to semiclassical code: update `semiclassical/doc_technical.md`
+  and/or `semiclassical/doc_user_guide.md`
+
+If a code change affects numerical values cited in docs (matrix
+dimensions, BZ vectors, parameter defaults, etc.), grep the docs for the
+old values and fix every occurrence. A past failure to do this caused
+`Nq = 2*qq` to persist across four doc files when the code actually uses
+`Nq = qq`.
 
 ## What not to do
 

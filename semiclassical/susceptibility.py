@@ -406,7 +406,7 @@ def main(fpath=None):
 
     if outfile.endswith('.mat'):
         from scipy.io import savemat
-        savemat(outfile, result)
+        savemat(outfile, {'results': result, 'params': inp})
     else:
         np.savez(outfile, **result)
 
