@@ -28,7 +28,9 @@ def _unpack_mat(raw):
         if k.startswith('__'):
             continue
         if isinstance(v, np.ndarray):
-            if v.ndim == 2 and v.shape == (1, 1):
+            if v.dtype.names is not None:
+                data[k] = v
+            elif v.ndim == 2 and v.shape == (1, 1):
                 data[k] = v.item()
             elif v.ndim == 2 and v.shape[0] == 1:
                 data[k] = v.ravel()
