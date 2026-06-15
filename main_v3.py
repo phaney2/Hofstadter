@@ -257,7 +257,7 @@ def do_calc(filepath):
     n11 = n1grid.flatten(order='F')
     n22 = n2grid.flatten(order='F')
 
-    vb = np.array([b1 / pp, b2 / pp])
+    vb = np.array([b1 / pp, b2 * qq / pp])
     kpoints = np.zeros((Nk_tot, 2))
     for j in range(Nk_tot):
         frac = np.array([n11[j] / nk1, n22[j] / nk2])

@@ -5,7 +5,7 @@ boron nitride (hBN).  Two calculation modes:
 
 1. **Hofstadter** (`main_v3.py`): Magnetic Bloch bands in a Landau-level
    basis at rational magnetic flux `qq/pp` per moire unit cell.
-   (`main_v2.py` is the legacy driver without chain doubling.)
+   (`main_v2.py` is the legacy driver with old T-matrix conventions.)
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
    expansion (no magnetic field), computed along a k-path through the
    moire Brillouin zone.
@@ -32,8 +32,8 @@ The Hamiltonian is expressed in a Landau-level (LL) basis.  Each basis state
 is labeled by:
 
 - **Sublattice** (`A` or `B`)
-- **Guiding-center index** (`q0`, `q1`, ..., `q{2*qq-1}`) -- there are
-  `2*qq` guiding centers per magnetic unit cell (doubled chain)
+- **Guiding-center index** (`q0`, `q1`, ..., `q{qq-1}`) -- there are
+  `qq` guiding centers per magnetic unit cell
 - **Landau-level index** (`LL0`, `LL1`, ..., `LL{N}`)
 
 ### Bilayer (`nlayers = 2`)
@@ -84,7 +84,7 @@ Code is split across six modules:
 | `numerics.py` | Mathematical routines: Laguerre polynomials, F_nm matrix elements |
 | `basis.py` | Label-based basis toolkit: outer product and index lookup |
 | `hamiltonian.py` | All Hamiltonian construction (intralayer, intermonolayer, interbilayer, testing variants) |
-| `main_v3.py` | Production engine with doubled chain and corrected moire coupling |
+| `main_v3.py` | Production engine with doubled unit cell and corrected moire coupling (Nq=qq) |
 | `main_v2.py` | Legacy engine (single chain, old moire coupling conventions) |
 | `hofstadter_testing.py` | Butterfly sweep engine with configurable T-matrix conventions |
 
@@ -134,15 +134,15 @@ Code is split across six modules:
 | `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths.  Operates on pre-scaled data (already multiplied by `1000/Q_E`) so no per-k-point unit conversion is needed.  Uses `eigvalsh(overwrite_a=True, check_finite=False)` to avoid internal copies. |
 | `_init_kpoint_worker(shared)` | Pool initializer: stores shared matrices in module-global `_worker_shared` so they are pickled once per worker, not per task. |
 | `_solve_kpoint(args)` | Pool worker entry point.  Unpacks `(kc, kpt)`, calls `_solve_kpoint_core`, returns `(kc, tek_K, tek_Kp)`. |
-| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer or bilayer depending on `nlayers`) using doubled chain (`Nq = 2*qq`), pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
+| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer or bilayer depending on `nlayers`) using `Nq = qq` with doubled unit cell, pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
 | `main(input_file)` | CLI wrapper: calls `do_calc`, saves result to `.npz` or `.mat`. |
 
 Differences from `main_v2.py` (legacy):
 
 | Feature | main_v2 | main_v3 |
 |---|---|---|
-| Chain size | `Nq = qq` | `Nq = 2*qq` |
-| BZ vectors | `[b1/pp, b2*qq/pp]` | `[b1/pp/2, b2/pp]` |
+| Chain size | `Nq = qq` | `Nq = qq` |
+| BZ vectors | `[b1/pp, b2*qq/pp]` | `[b1/pp, b2*qq/pp]` |
 | T matrices | Old conventions | Corrected (order=[3,1,2], conj=1, psiconj=1) |
 | BLAS threads | `OPENBLAS_NUM_THREADS=1` | `OPENBLAS_NUM_THREADS=1` |
 | U identity | `np.eye(dim1)` | `np.eye(Hintra.shape[0])` (post-chop) |
@@ -195,14 +195,15 @@ This chopping happens independently in each Hamiltonian builder and in the
 
 ## 4. Matrix dimensions
 
-For a given `(pp, qq, N)` with doubled chain (`main_v3.py`):
+For a given `(pp, qq, N)` with `main_v3.py`:
 
-- Guiding centers per magnetic unit cell: `Nq = 2*qq`
-- Basis states per layer before chopping: `2 * 2*qq * (N+1)` (two sublattices)
-- After chopping LL_N from one sublattice: `2*qq*(2N+1)`
-- Total Hamiltonian dimension: `nlayers * 2*qq*(2N+1)`
+- Guiding centers per magnetic unit cell: `Nq = qq`
+- Basis states per layer before chopping: `2 * qq * (N+1)` (two sublattices)
+- After chopping LL_N from one sublattice: `qq*(2N+1)`
+- Total Hamiltonian dimension: `nlayers * qq*(2N+1)`
 
-Legacy (`main_v2.py`) uses `Nq = qq`, giving half the dimension per layer.
+Both `main_v3.py` and `main_v2.py` use `Nq = qq`; they differ in
+T-matrix conventions, BZ vectors, and the real-space unit cell definition.
 
 N is determined automatically:
 `N = LL_multiplier * round(max(hbar*vF*ktheta, w) / eneLL)^2`, capped at
@@ -220,12 +221,10 @@ b1 = ktheta * [0, -1]
 b2 = ktheta * [sqrt(3)/2, 1/2]
 ```
 
-With the doubled chain, the magnetic BZ vectors are `b1/(2*pp)` and
-`b2/pp`.  The k-mesh is a uniform `nk1 x nk2` grid over this BZ,
+Both `main_v3.py` and `main_v2.py` use magnetic BZ vectors `b1/pp` and
+`b2*qq/pp`.  The k-mesh is a uniform `nk1 x nk2` grid over this BZ,
 flattened in column-major (Fortran) order to match MATLAB conventions.
 Each k-point is shifted by `-M_mag` before entering the Hamiltonian.
-
-Legacy (`main_v2.py`) uses BZ vectors `b1/pp` and `b2*qq/pp`.
 
 ---
 
@@ -386,7 +385,7 @@ w          = exp(-i*2pi/3)    (sublattice phase rotation)
 
 | File | Role |
 |---|---|
-| `main_v3.py` | Production Hofstadter engine (doubled chain, corrected coupling) |
+| `main_v3.py` | Production Hofstadter engine (doubled unit cell, Nq=qq, corrected coupling) |
 | `main_v2.py` | Legacy Hofstadter engine (single chain, old coupling conventions) |
 | `hofstadter_testing.py` | Butterfly sweep engine with configurable T-matrix conventions |
 | `hamiltonian.py` | Hamiltonian construction (intralayer, intermonolayer, interbilayer, testing variants) |

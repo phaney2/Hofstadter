@@ -204,14 +204,14 @@ cell, use `qq/pp = 2` (e.g. qq=2, pp=1).
 
 ### Hofstadter mode — BZ normalization for Chern numbers
 
-The k-mesh vectors are `vb = [b1/pp, b2/pp]` where b1, b2 are the
-primitive moire reciprocal lattice vectors. This covers a k-space area
-that is `1/pp²` of the moire BZ. The half-chain convention (Nq = qq)
-uses a doubled real-space unit cell with chain phase factors doubled
-to compensate.
+The k-mesh vectors are `vb = [b1/pp, b2*qq/pp]` where b1, b2 are the
+primitive moire reciprocal lattice vectors. The b2 direction is qq times
+larger than b1/pp because the phase factors `exp(i*(pp/qq)*k·L)` require
+qq periods in b2 for the Hamiltonian to be periodic, while the chain
+structure already provides periodicity in b1 at the b1/pp spacing.
 
-The real-space area for BZ normalization is `vol_M = pp² × uc_area / 2
-= pp² × A_prim`, giving `BZ_area = (2π)² / vol_M = (2π)² / (pp² A_prim)`.
+The real-space area for BZ normalization is `vol_M = pp² × uc_area / (2*qq)`,
+giving `BZ_area = (2π)² / vol_M = qq × (2π)² / (pp² A_prim)`.
 
 For Chern numbers: only the total Chern of a set of bands between two
 well-defined energy gaps is quantized. Individual band Chern numbers are
