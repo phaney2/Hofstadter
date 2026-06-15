@@ -196,10 +196,9 @@ gfactor = 1
 This mode branches directly from bandstructure output (not isoenergy).
 At each B, it forms E_mod(k) = E_K(k) + gfactor×B×Lz_K(k) and
 recomputes isoenergy contours on the modified energy surface. The
-orbital moment is included non-perturbatively, so the morb term is
-forced to 0 internally. The `term_factors` array is 2-element:
-`[BC_factor chi_factor]`.  Output keys use suffixes `_S`, `_SB`, `_SBC`
-(SBM is skipped since morb is in the energy surface).
+orbital moment is included non-perturbatively in the dispersion, so
+all output already contains the M correction.  Output keys use suffixes
+`_SM` (area only) and `_SBM` (area + enclosed Berry curvature).
 Intermediate orbit data (areas, enclosed BC) are saved per B value for
 debugging.
 
@@ -285,9 +284,8 @@ One set of suffixed matrices is saved per band that has closed orbits.
 | `nE`                      | scalar                | —       | Energy points per band |
 | `nbands`                  | scalar                | —       | Number of bands |
 | `gfactor`                 | scalar                | —       | Orbital moment prefactor |
-| `LL_{v}_band{n}_S`        | (nB, nmax+1)          | meV     | LL from area only |
-| `LL_{v}_band{n}_SB`       | (nB, nmax+1)          | meV     | + enclosed BC |
-| `LL_{v}_band{n}_SBM`      | (nB, nmax+1)          | meV     | + dL/dE (zeros — morb is in E_mod) |
+| `LL_{v}_band{n}_SM`       | (nB, nmax+1)          | meV     | LL from area (morb in dispersion) |
+| `LL_{v}_band{n}_SBM`      | (nB, nmax+1)          | meV     | + enclosed BC |
 | `area_K_band{n}`          | (nB, nE, npockets)    | m^-2    | K valley orbit areas per B |
 | `area_Kp_band{n}`         | (nB, nE, npockets)    | m^-2    | K' valley orbit areas per B |
 | `enclosedBC_K_band{n}`    | (nB, nE, npockets)    | —       | K valley enclosed BC per B |

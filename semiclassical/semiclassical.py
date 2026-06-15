@@ -226,11 +226,20 @@ def _onsager_bfield_worker(args):
             [B], nmax, E_levels, area, enclosedBC,
             np.zeros(nE), term_factors=tf_3)
 
+        if ll_dict is not None:
+            ll_renamed = {}
+            if 'S' in ll_dict:
+                ll_renamed['SM'] = ll_dict['S'][0]
+            if 'SB' in ll_dict:
+                ll_renamed['SBM'] = ll_dict['SB'][0]
+        else:
+            ll_renamed = None
+
         band_results[n] = {
             'area': area,
             'enclosedBC': enclosedBC,
             'E_levels': E_levels,
-            'll_dict': {k: v[0] for k, v in ll_dict.items()} if ll_dict is not None else None,
+            'll_dict': ll_renamed,
         }
 
     return band_results
@@ -326,7 +335,7 @@ def run_onsager_bfield(inp, bs_data):
 
         n_with_orbits = sum(
             1 for n in range(nbands)
-            if f'LL_{valley}_band{n}_S' in result)
+            if f'LL_{valley}_band{n}_SM' in result)
         print(f"  {valley} valley: {n_with_orbits} bands with orbits")
 
     print("  Done.")
