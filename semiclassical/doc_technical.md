@@ -215,7 +215,9 @@ giving `BZ_area = (2π)² / vol_M = qq × (2π)² / (pp² A_prim)`.
 
 For Chern numbers: only the total Chern of a set of bands between two
 well-defined energy gaps is quantized. Individual band Chern numbers are
-only meaningful when bands are isolated by gaps larger than eta.
+only meaningful when bands are isolated by gaps larger than the Kubo
+broadening.  In Hofstadter mode, the Kubo broadening is set by
+`eta_kubo` (meV, default 2), separate from the moire coupling `eta`.
 
 ## Susceptibility (Fukuyama formula)
 

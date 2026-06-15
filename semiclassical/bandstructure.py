@@ -343,7 +343,7 @@ def _do_calc_hofstadter(inp):
     setup = build_hofstadter_setup(inp)
 
     hbar = 6.582119569e-16       # eV * s
-    eta = float(inp.get('eta', 1))
+    eta = float(inp.get('eta_kubo', 2)) / 1000.0
     ispar = int(inp.get('isparallel', 0))
     nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
     if nprocs is not None:

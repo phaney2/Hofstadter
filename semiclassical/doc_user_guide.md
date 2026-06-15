@@ -440,7 +440,8 @@ magnetic Bloch bands in a Landau level basis at rational flux qq/pp.
 | `gamma`          | —     | Reduction factor for moire coupling (default: 1) |
 | `vF`             | m/s   | Fermi velocity (default: 1e6) |
 | `nlayers`        | —     | 1 = monolayer, 2 = bilayer |
-| `eta`            | eV    | Broadening for Berry curvature |
+| `eta`            | —     | Moire coupling parameter (passed to Hamiltonian construction) |
+| `eta_kubo`       | meV   | Broadening for Berry curvature Kubo sum (default: 2) |
 
 Shared parameters (`nk1`, `nk2`, `bands`, `isparallel`, `outputfile`,
 `U`) work identically to zero-field mode.
