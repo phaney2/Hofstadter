@@ -75,7 +75,8 @@ def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
 
     B2 = B_vec[:, :, 0]
 
-    base_S = -tarea[:, np.newaxis] * np.ones_like(B2) / (2 * np.pi)**2
+    Bsign = np.sign(B2)
+    base_S = -Bsign * tarea[:, np.newaxis] / (2 * np.pi)**2
     result = {'S': _solve_onsager(rhs, base_S, valid, E_levels)}
 
     base_SB = base_S - BC_factor * tBC[:, np.newaxis] * B2 / (2 * np.pi * PHI0)
