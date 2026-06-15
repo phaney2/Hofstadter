@@ -73,17 +73,14 @@ def save_result(result, outfile, params=None):
 # ---------------------------------------------------------------------------
 
 def run_bandstructure(inp, fpath):
-    result = do_calc(fpath)
-    result['nk1'] = int(inp['nk1'])
-    result['nk2'] = int(inp['nk2'])
-    return result
+    return do_calc(fpath)
 
 
 def run_isoenergy(inp, bs_data):
     from isoenergy import get_energy_resolved_data
 
-    nk1 = int(bs_data['nk1'])
-    nk2 = int(bs_data['nk2'])
+    nk1 = int(inp['nk1'])
+    nk2 = int(inp['nk2'])
     nbands = bs_data['E_K'].shape[0]
     kT = float(inp.get('kT', 3.0))
     nE = int(inp['nE'])
@@ -253,8 +250,8 @@ def run_onsager_bfield(inp, bs_data):
         inp.get('term_factors', np.array([1.0, 1.0]))).astype(float)
     term_factors = tuple(tf_raw[:2])
 
-    nk1 = int(bs_data['nk1'])
-    nk2 = int(bs_data['nk2'])
+    nk1 = int(inp['nk1'])
+    nk2 = int(inp['nk2'])
     vol_M = float(bs_data['vol_M'])
     nbands = bs_data['E_K'].shape[0]
     nB = len(Blist)
