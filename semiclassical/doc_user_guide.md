@@ -277,6 +277,8 @@ within the actual band range rather than spanning the union of both valleys.
 
 where `{v}` is `K` or `Kp` and `{i}` is the 0-based band index.
 One set of suffixed matrices is saved per band that has closed orbits.
+Entries where the Onsager condition has no valid root (e.g., above the
+band edge) are NaN.
 
 ### Onsager_bfield output (`calctype = onsager_bfield`)
 

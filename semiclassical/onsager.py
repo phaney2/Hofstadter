@@ -15,11 +15,17 @@ HBAR_SI = 1.05457182e-34  # J*s
 PHI0 = 2 * np.pi * HBAR_SI / EC
 
 
-def _solve_onsager(rhs, base, valid, E_levels):
+def _solve_onsager(rhs, base, valid, E_levels, rtol=0.05):
     onsager = rhs + base[:, :, np.newaxis]
     onsager[~valid, :, :] = np.inf
-    ind = np.argmin(np.abs(onsager), axis=0)
-    return E_levels[ind]
+    residual = np.abs(onsager)
+    ind = np.argmin(residual, axis=0)
+    best = np.take_along_axis(residual, ind[np.newaxis, :, :], axis=0)[0]
+    scale = np.abs(rhs[0, :, :])
+    scale = np.where(scale > 0, scale, 1.0)
+    result = E_levels[ind]
+    result[best / scale > rtol] = np.nan
+    return result
 
 
 def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
@@ -62,6 +68,7 @@ def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
     dict or None
         {'S': LL_S, 'SB': LL_SB, 'SBM': LL_SBM, 'SBMC': LL_SBMC}
         where each value is (nB, nmax+1).  SBMC omitted if no chi data.
+        Entries with no valid root (residual > rtol × rhs) are NaN.
         None if no orbits found.
     """
     BC_factor, morb_factor, chi_factor = term_factors

@@ -336,6 +336,19 @@ Output keys: `Blist` (nB,), `nmax` (scalar), and per-band cumulative LL
 arrays with suffixes `_S`, `_SB`, `_SBM`, `_SBMC` (e.g.
 `LL_K_band{i}_S`, `LL_K_band{i}_SBM`) for each band with orbits.
 
+### Root validation
+
+`_solve_onsager` uses `argmin` over the energy grid, which always returns
+an index even when no true root exists. Without thresholding, the minimum
+residual tends to land at the orbit area maximum (Van Hove singularity /
+saddle point), producing a spurious B-independent "flat" Landau level.
+
+To suppress these trivial roots, `_solve_onsager` checks whether the best
+residual exceeds `rtol` (default 5%) times the rhs magnitude
+`B(n+½)/φ₀`. If so, the entry is set to NaN. This removes spurious levels
+while preserving all genuine roots where the Onsager condition is
+approximately satisfied.
+
 ## Non-perturbative Onsager (`onsager_bfield`)
 
 An alternative pipeline that includes the orbital moment non-perturbatively.
