@@ -86,6 +86,12 @@ than re-parsing the source.
   `inv(RR) @ T @ RR` to compensate for the rotated moire pattern while
   keeping q-vectors canonical. The q-vectors always use fixed directions
   `[0,-1]`, `[√3/2, 1/2]`, `[-√3/2, 1/2]` scaled by `ktheta = |G1|`.
+- **Bilayer stacking type**: The `stacking_type` parameter (default 2)
+  controls the off-diagonal block arrangement in the bilayer Hamiltonian.
+  Type 2 (A1-B2) puts `Hinter` in the upper-right; Type 1 (B1-A2) swaps
+  the off-diagonal blocks.  See Moon & Koshino, PRB 90, 155406 (2014),
+  Eqs. 25 and B1.  This applies to `main_v3.py`, `zerofield.py`, and the
+  semiclassical code (`bandstructure.py`, `hofstadter_system.py`).
 - The basis label system (composite strings with `_` separators, searched
   via substring intersection) is load-bearing. Any change to label
   formatting will silently break `getindices` lookups.

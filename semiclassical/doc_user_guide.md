@@ -67,6 +67,7 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `U`             | [0 0]   | Layer potentials [U_top U_bottom] (meV) |
 | `g3` or `v3`    | 0       | Trigonal warping: `g3` in meV (converted via `v3 = g3 * 2.46 / 1000`), or `v3` in eV·A |
 | `isparallel`    | 0       | 1 = use multiprocessing for k-loop |
+| `stacking_type` | 2       | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). See Moon & Koshino, PRB 90, 155406 (2014). Ignored for monolayer. |
 | `kT`            | 3       | Thermal broadening for dL/dE (meV) |
 | `Blist`         | —       | Magnetic field values (T) for Onsager quantization, e.g. `linspace(0,12,100)` |
 | `nmax`          | 50      | Maximum Landau level index (used with `Blist`) |
@@ -438,6 +439,7 @@ magnetic Bloch bands in a Landau level basis at rational flux qq/pp.
 | `gamma`          | —     | Reduction factor for moire coupling (default: 1) |
 | `vF`             | m/s   | Fermi velocity (default: 1e6) |
 | `nlayers`        | —     | 1 = monolayer, 2 = bilayer |
+| `stacking_type`  | —     | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2, default). Ignored for monolayer. |
 | `eta`            | —     | Moire coupling parameter (passed to Hamiltonian construction) |
 | `eta_kubo`       | meV   | Broadening for Berry curvature Kubo sum (default: 2) |
 

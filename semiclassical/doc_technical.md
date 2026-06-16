@@ -73,9 +73,20 @@ H = H0_B + H_hopp       dim = 2*NG
 ```
 
 ### Bilayer (nlayers=2)
+
+Two stacking configurations, selected by `stacking_type` (default 2).
+See Moon & Koshino, PRB 90, 155406 (2014), Eqs. 25 and B1.
+
+**Type 2 (default):**
 ```
 H = [ H0_T    UBLG† ]   dim = 4*NG
     [ UBLG    H0_B + H_hopp ]
+```
+
+**Type 1:**
+```
+H = [ H0_T    UBLG  ]   dim = 4*NG
+    [ UBLG†   H0_B + H_hopp ]
 ```
 
 ### Dirac blocks (K valley)

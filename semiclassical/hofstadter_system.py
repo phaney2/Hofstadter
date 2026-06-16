@@ -64,6 +64,7 @@ def build_hofstadter_setup(inp):
     bands_sel = np.atleast_1d(inp['bands']).astype(int)
     num_bands = 2 * (int(np.max(np.abs(bands_sel))) + 1)
     nremotebands = int(inp.get('nremotebands', 300))
+    stacking_type = int(inp.get('stacking_type', 2))
 
     # --- Derived quantities (SI) ---
     eps = A_HBN / A_GRAPHENE - 1
@@ -127,10 +128,16 @@ def build_hofstadter_setup(inp):
         Ubm_val = U[1] / 1e3 * Q_E
         Hinter_K = get_intermonolayerH_K(N, 0, B, qNslabels_K, TBGparams)
         Hintra2_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'B')
-        H_base_K = np.block([
-            [Hintra_K + np.eye(dl) * Utp_val, Hinter_K],
-            [Hinter_K.T.conj(), Hintra2_K + np.eye(dl) * Ubm_val]
-        ])
+        if stacking_type == 1:
+            H_base_K = np.block([
+                [Hintra_K + np.eye(dl) * Utp_val, Hinter_K.T.conj()],
+                [Hinter_K, Hintra2_K + np.eye(dl) * Ubm_val]
+            ])
+        else:
+            H_base_K = np.block([
+                [Hintra_K + np.eye(dl) * Utp_val, Hinter_K],
+                [Hinter_K.T.conj(), Hintra2_K + np.eye(dl) * Ubm_val]
+            ])
         zz = np.zeros_like(Ax_K)
         Ax_full_K = np.block([[Ax_K, zz], [zz, Ax_K]])
         Ay_full_K = np.block([[Ay_K, zz], [zz, Ay_K]])
@@ -153,10 +160,16 @@ def build_hofstadter_setup(inp):
         Ubm_val = U[1] / 1e3 * Q_E
         Hinter_Kp = get_intermonolayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams)
         Hintra2_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'B')
-        H_base_Kp = np.block([
-            [Hintra_Kp + np.eye(dl) * Utp_val, Hinter_Kp],
-            [Hinter_Kp.T.conj(), Hintra2_Kp + np.eye(dl) * Ubm_val]
-        ])
+        if stacking_type == 1:
+            H_base_Kp = np.block([
+                [Hintra_Kp + np.eye(dl) * Utp_val, Hinter_Kp.T.conj()],
+                [Hinter_Kp, Hintra2_Kp + np.eye(dl) * Ubm_val]
+            ])
+        else:
+            H_base_Kp = np.block([
+                [Hintra_Kp + np.eye(dl) * Utp_val, Hinter_Kp],
+                [Hinter_Kp.T.conj(), Hintra2_Kp + np.eye(dl) * Ubm_val]
+            ])
         zz = np.zeros_like(Ax_Kp)
         Ax_full_Kp = np.block([[Ax_Kp, zz], [zz, Ax_Kp]])
         Ay_full_Kp = np.block([[Ay_Kp, zz], [zz, Ay_Kp]])

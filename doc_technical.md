@@ -39,13 +39,29 @@ is labeled by:
 ### Bilayer (`nlayers = 2`)
 
 The total Hamiltonian for each valley is a 2x2 block matrix (two graphene
-layers):
+layers).  Two stacking configurations are supported, controlled by the
+`stacking_type` input parameter (default 2).  These correspond to the two
+AB-stacking geometries in Moon & Koshino, PRB 90, 155406 (2014):
 
+**Type 2 (A1-B2, default)** — Eq. B1:
 ```
-H_total = H_BLG + V_hBN
-
 H_BLG = [ Hintra1 + U_top    Hinter        ]
         [ Hinter^dagger      Hintra2 + U_bot ]
+```
+
+**Type 1 (B1-A2)** — Eq. 25:
+```
+H_BLG = [ Hintra1 + U_top    Hinter^dagger ]
+        [ Hinter             Hintra2 + U_bot ]
+```
+
+The off-diagonal interlayer blocks are swapped between the two types.
+The spectra are similar but not identical, with small differences at the
+BZ boundary (see Fig. 10 of the reference).
+
+The full Hamiltonian is:
+```
+H_total = H_BLG + V_hBN
 
 V_hBN = [ 0           0          ]
         [ 0           V_hBN_tot  ]
@@ -487,9 +503,18 @@ The number of retained plane waves is `NG = NQ^2`.
 
 ### Bilayer (`nlayers = 2`)
 
+Two stacking configurations, selected by `stacking_type` (default 2):
+
+**Type 2 (default):**
 ```
 H = [ H_top(k)      U_BLG(k)^dag ]
     [ U_BLG(k)       H_bot(k) + H_hopp ]
+```
+
+**Type 1:**
+```
+H = [ H_top(k)      U_BLG(k)     ]
+    [ U_BLG(k)^dag   H_bot(k) + H_hopp ]
 ```
 
 - `H_top/H_bot`: block-diagonal Dirac Hamiltonians, one 2x2 block per

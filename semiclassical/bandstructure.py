@@ -160,7 +160,8 @@ U1   = np.array([[0, 1],  [0, 0]],  dtype=complex)
 U2   = np.array([[0, 0],  [1, 0]],  dtype=complex)
 
 
-def assemble_H_V_K(kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp, hbar, nlayers):
+def assemble_H_V_K(kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp, hbar, nlayers,
+                    stacking_type=2):
     H0_B = np.zeros((2*NG, 2*NG), dtype=complex)
     Vx_B = np.zeros_like(H0_B)
     Vy_B = np.zeros_like(H0_B)
@@ -194,16 +195,25 @@ def assemble_H_V_K(kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp, hbar, nlayers):
         Vy_T[s, s]  = vF * sigy / hbar
         Vy_TB[s, s] = 1j * v3 * U2 / hbar
 
-    H  = np.block([[H0_T, UBLG.conj().T],
-                   [UBLG, H0_B + H_hopp]])
-    Vx = np.block([[Vx_T, Vx_TB.conj().T],
-                   [Vx_TB, Vx_B]])
-    Vy = np.block([[Vy_T, Vy_TB.conj().T],
-                   [Vy_TB, Vy_B]])
+    if stacking_type == 1:
+        H  = np.block([[H0_T, UBLG],
+                       [UBLG.conj().T, H0_B + H_hopp]])
+        Vx = np.block([[Vx_T, Vx_TB],
+                       [Vx_TB.conj().T, Vx_B]])
+        Vy = np.block([[Vy_T, Vy_TB],
+                       [Vy_TB.conj().T, Vy_B]])
+    else:
+        H  = np.block([[H0_T, UBLG.conj().T],
+                       [UBLG, H0_B + H_hopp]])
+        Vx = np.block([[Vx_T, Vx_TB.conj().T],
+                       [Vx_TB, Vx_B]])
+        Vy = np.block([[Vy_T, Vy_TB.conj().T],
+                       [Vy_TB, Vy_B]])
     return H, Vx, Vy
 
 
-def assemble_H_V_Kp(kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp, hbar, nlayers):
+def assemble_H_V_Kp(kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp, hbar, nlayers,
+                     stacking_type=2):
     H0_B = np.zeros((2*NG, 2*NG), dtype=complex)
     Vx_B = np.zeros_like(H0_B)
     Vy_B = np.zeros_like(H0_B)
@@ -237,12 +247,20 @@ def assemble_H_V_Kp(kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp, hbar, nlayers)
         Vy_T[s, s]  = vF * sigy / hbar
         Vy_TB[s, s] = 1j * v3 * U2 / hbar
 
-    H  = np.block([[H0_T, UBLG.conj().T],
-                   [UBLG, H0_B + H_hopp]])
-    Vx = np.block([[Vx_T, Vx_TB.conj().T],
-                   [Vx_TB, Vx_B]])
-    Vy = np.block([[Vy_T, Vy_TB.conj().T],
-                   [Vy_TB, Vy_B]])
+    if stacking_type == 1:
+        H  = np.block([[H0_T, UBLG],
+                       [UBLG.conj().T, H0_B + H_hopp]])
+        Vx = np.block([[Vx_T, Vx_TB],
+                       [Vx_TB.conj().T, Vx_B]])
+        Vy = np.block([[Vy_T, Vy_TB],
+                       [Vy_TB.conj().T, Vy_B]])
+    else:
+        H  = np.block([[H0_T, UBLG.conj().T],
+                       [UBLG, H0_B + H_hopp]])
+        Vx = np.block([[Vx_T, Vx_TB.conj().T],
+                       [Vx_TB, Vx_B]])
+        Vy = np.block([[Vy_T, Vy_TB.conj().T],
+                       [Vy_TB, Vy_B]])
     return H, Vx, Vy
 
 
@@ -253,11 +271,12 @@ def assemble_H_V_Kp(kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp, hbar, nlayers)
 def _kpoint_worker(args):
     (kc, kpt, Q, NG, vF, gamma1, v3, Utp, Ubm,
      H_hopp_K, H_hopp_Kp, hbar, nlayers,
-     target_idx, remote_ind, eta) = args
+     target_idx, remote_ind, eta, stacking_type) = args
 
     # --- K valley ---
     HK, VKx, VKy = assemble_H_V_K(
-        kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp_K, hbar, nlayers)
+        kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp_K, hbar, nlayers,
+        stacking_type)
     ekK, PsiK = eigh(HK)
 
     vx_K = PsiK.conj().T @ VKx @ PsiK
@@ -273,7 +292,8 @@ def _kpoint_worker(args):
 
     # --- K' valley ---
     HKp, VKpx, VKpy = assemble_H_V_Kp(
-        kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp_Kp, hbar, nlayers)
+        kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp_Kp, hbar, nlayers,
+        stacking_type)
     ekKp, PsiKp = eigh(HKp)
 
     vx_Kp = PsiKp.conj().T @ VKpx @ PsiKp
@@ -476,6 +496,7 @@ def do_calc(filepath):
         nprocs = int(nprocs)
     U        = np.atleast_1d(inp.get('U', np.array([0, 0])))
     bands_sel = np.atleast_1d(inp['bands']).astype(int)
+    stacking_type = int(inp.get('stacking_type', 2))
 
     hbar = 6.582119569e-16       # eV * s
 
@@ -523,7 +544,7 @@ def do_calc(filepath):
     # --- Build worker args ---
     common = (Q, NG, vF, gamma1_ev, v3, Utp, Ubm,
               H_hopp_K, H_hopp_Kp, hbar, nlayers,
-              target_idx, remote_ind, eta)
+              target_idx, remote_ind, eta, stacking_type)
     args_list = [(kc, kpoints[kc], *common) for kc in range(Nk_tot)]
 
     # --- Run k-loop ---

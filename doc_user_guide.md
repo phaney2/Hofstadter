@@ -81,6 +81,7 @@ variables (e.g., `elist` can use `nebin`).
 | `Nmax` | int | `1000` | Hard cap on number of Landau levels |
 | `isparallel` | int | `1` | 0 = serial, 1 = parallel k-loop |
 | `layer_resolved` | int | `0` | 1 = compute per-eigenstate layer weights (bilayer only; uses `eigh` instead of `eigvalsh`) |
+| `stacking_type` | int | `2` | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). See Moon & Koshino, PRB 90, 155406 (2014), Eqs. 25 and B1. Ignored for monolayer. |
 
 #### Output control
 
@@ -115,6 +116,7 @@ variables (e.g., `elist` can use `nebin`).
 | `NQ` | int | `7` | Q-vector grid size per direction (total: NQ^2 plane waves) |
 | `dk` | float (1/A) | `5e-4` | k-point spacing along the path |
 | `valley` | cell | `{'K', 'Kp'}` | Which valleys to compute |
+| `stacking_type` | int | `2` | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). Ignored for monolayer. |
 | `outputfile` | string | `bands_zerofield.npz` | Output filename |
 
 ---

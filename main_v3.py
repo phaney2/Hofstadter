@@ -155,6 +155,7 @@ def do_calc(filepath):
     layer_resolved = int(d.get('layer_resolved', 0))
     if layer_resolved and nlayers == 1:
         layer_resolved = 0
+    stacking_type = int(d.get('stacking_type', 2))
 
     if calctype == 'spectrum':
         calctype = 'dos'
@@ -216,10 +217,16 @@ def do_calc(filepath):
             Hintra2_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'B')
             Utp = np.eye(dl) * Utp_val
             Ubm = np.eye(dl) * Ubm_val
-            H_base_K = np.block([
-                [Hintra_K + Utp, Hinter_K],
-                [Hinter_K.T.conj(), Hintra2_K + Ubm]
-            ])
+            if stacking_type == 1:
+                H_base_K = np.block([
+                    [Hintra_K + Utp, Hinter_K.T.conj()],
+                    [Hinter_K, Hintra2_K + Ubm]
+                ])
+            else:
+                H_base_K = np.block([
+                    [Hintra_K + Utp, Hinter_K],
+                    [Hinter_K.T.conj(), Hintra2_K + Ubm]
+                ])
 
     # --- K' valley: k-independent Hamiltonian ---
     if 'Kp' in valley:
@@ -239,10 +246,16 @@ def do_calc(filepath):
             Hintra2_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'B')
             Utp = np.eye(dl) * Utp_val
             Ubm = np.eye(dl) * Ubm_val
-            H_base_Kp = np.block([
-                [Hintra_Kp + Utp, Hinter_Kp],
-                [Hinter_Kp.T.conj(), Hintra2_Kp + Ubm]
-            ])
+            if stacking_type == 1:
+                H_base_Kp = np.block([
+                    [Hintra_Kp + Utp, Hinter_Kp.T.conj()],
+                    [Hinter_Kp, Hintra2_Kp + Ubm]
+                ])
+            else:
+                H_base_Kp = np.block([
+                    [Hintra_Kp + Utp, Hinter_Kp],
+                    [Hinter_Kp.T.conj(), Hintra2_Kp + Ubm]
+                ])
 
     # --- k-mesh ---
     b1 = ktheta * np.array([0, -1])

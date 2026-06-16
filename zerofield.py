@@ -114,7 +114,7 @@ def _build_moire_hopping(Q_idx, NG, T0, T1, T2, T3, valley):
 
 
 def _solve_kpath_K(kpoints, Q, NG, hbar_vF, gamma1, hbar_v3,
-                   U_top, U_bot, H_hopp, nlayers):
+                   U_top, U_bot, H_hopp, nlayers, stacking_type=2):
     sigx = np.array([[0, 1], [1, 0]], dtype=complex)
     sigy = np.array([[0, -1j], [1j, 0]], dtype=complex)
     U1 = np.array([[0, 1], [0, 0]], dtype=complex)
@@ -147,8 +147,12 @@ def _solve_kpath_K(kpoints, Q, NG, hbar_vF, gamma1, hbar_v3,
                 UBLG[2*j:2*j+2, 2*j:2*j+2] = (
                     gamma1 * U1
                     - hbar_v3 * ((kx - qx) - 1j * (ky - qy)) * U2)
-            H = np.block([[H0_T, UBLG.conj().T],
-                          [UBLG, H0_B + H_hopp]])
+            if stacking_type == 1:
+                H = np.block([[H0_T, UBLG],
+                              [UBLG.conj().T, H0_B + H_hopp]])
+            else:
+                H = np.block([[H0_T, UBLG.conj().T],
+                              [UBLG, H0_B + H_hopp]])
 
         bands[i, :] = np.sort(linalg.eigvalsh(H))
 
@@ -156,7 +160,7 @@ def _solve_kpath_K(kpoints, Q, NG, hbar_vF, gamma1, hbar_v3,
 
 
 def _solve_kpath_Kp(kpoints, Q, NG, hbar_vF, gamma1, hbar_v3,
-                    U_top, U_bot, H_hopp, nlayers):
+                    U_top, U_bot, H_hopp, nlayers, stacking_type=2):
     sigx = np.array([[0, 1], [1, 0]], dtype=complex)
     sigy = np.array([[0, -1j], [1j, 0]], dtype=complex)
     U1 = np.array([[0, 1], [0, 0]], dtype=complex)
@@ -189,8 +193,12 @@ def _solve_kpath_Kp(kpoints, Q, NG, hbar_vF, gamma1, hbar_v3,
                 UBLG[2*j:2*j+2, 2*j:2*j+2] = (
                     gamma1 * U1
                     - hbar_v3 * (-(kx - qx) - 1j * (ky - qy)) * U2)
-            H = np.block([[H0_T, UBLG.conj().T],
-                          [UBLG, H0_B + H_hopp]])
+            if stacking_type == 1:
+                H = np.block([[H0_T, UBLG],
+                              [UBLG.conj().T, H0_B + H_hopp]])
+            else:
+                H = np.block([[H0_T, UBLG.conj().T],
+                              [UBLG, H0_B + H_hopp]])
 
         bands[i, :] = np.sort(linalg.eigvalsh(H))
 
@@ -248,6 +256,7 @@ def do_calc(filepath):
     NQ = int(inp.get('NQ', 7))
     dk = inp.get('dk', 5e-4)
     valley = inp.get('valley', ['K', 'Kp'])
+    stacking_type = int(inp.get('stacking_type', 2))
 
     a = A_GRAPHENE * 1e10
     a_hBN = A_HBN * 1e10
@@ -299,10 +308,12 @@ def do_calc(filepath):
 
         if v == 'K':
             bands = _solve_kpath_K(kpoints, Q, NG, hbar_vF, gamma1,
-                                   hbar_v3, U_top, U_bot, H_hopp, nlayers)
+                                   hbar_v3, U_top, U_bot, H_hopp, nlayers,
+                                   stacking_type)
         else:
             bands = _solve_kpath_Kp(kpoints, Q, NG, hbar_vF, gamma1,
-                                    hbar_v3, U_top, U_bot, H_hopp, nlayers)
+                                    hbar_v3, U_top, U_bot, H_hopp, nlayers,
+                                    stacking_type)
 
         suffix = '_K' if v == 'K' else '_Kp'
         result[f'band{suffix}'] = bands
