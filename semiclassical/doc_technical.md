@@ -352,9 +352,12 @@ E_mod(k) = E_K(k) + gfactor × B × Lz_K(k)
 ```
 
 Then computes isoenergy contours on E_mod, finds enclosed Berry curvature,
-and solves the Onsager condition. Since the orbital moment is already in
-the energy surface, output suffixes are `_SM` (area only, morb in
-dispersion) and `_SBM` (+ enclosed BC).
+and solves the Onsager condition. The rhs of the Onsager condition is
+`Bmultiplier × B × (n + ½) / φ₀`, where `Bmultiplier` defaults to 1
+(`onsager_Bmultiplier` input parameter; diagnostic/testing).
+
+Since the orbital moment is already in the energy surface, output suffixes
+are `_SM` (area only, morb in dispersion) and `_SBM` (+ enclosed BC).
 
 Each B value is independent; parallelized over Blist via `multiprocessing.Pool`
 when `isparallel=1`. The worker calls `isoenergy_areas` directly (not

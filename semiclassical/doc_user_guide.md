@@ -74,6 +74,7 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `term_factors`  | [1 1 1] | Multiplicative factors for Onsager correction terms: `[BC_factor morb_factor chi_factor]` (see below) |
 | `susceptibility_datafile` | — | Path to susceptibility `.mat` file (for `onsager` stage with `chiflag=1`) |
 | `gfactor`       | 1       | Orbital moment prefactor for `onsager_bfield`: E_mod = E_K + gfactor×B×Lz_K |
+| `onsager_Bmultiplier` | 1 | Multiplicative factor on B in the Onsager rhs (`onsager_bfield` only). Diagnostic/testing parameter. |
 | `outputfile`    | auto    | Output filename; defaults to `electronic_structure_data_{nk1}.mat` |
 
 ### Onsager quantization terms (`term_factors`)
@@ -192,6 +193,7 @@ Blist = linspace(0,12,50)
 nmax = 30
 nE = 200
 gfactor = 1
+onsager_Bmultiplier = 1
 ```
 
 This mode branches directly from bandstructure output (not isoenergy).
@@ -285,6 +287,7 @@ One set of suffixed matrices is saved per band that has closed orbits.
 | `nE`                      | scalar                | —       | Energy points per band |
 | `nbands`                  | scalar                | —       | Number of bands |
 | `gfactor`                 | scalar                | —       | Orbital moment prefactor |
+| `onsager_Bmultiplier`     | scalar                | —       | B multiplier in Onsager rhs (diagnostic) |
 | `LL_{v}_band{n}_SM`       | (nB, nmax+1)          | meV     | LL from area (morb in dispersion) |
 | `LL_{v}_band{n}_SBM`      | (nB, nmax+1)          | meV     | + enclosed BC |
 | `area_K_band{n}`          | (nB, nE, npockets)    | m^-2    | K valley orbit areas per B |

@@ -23,7 +23,8 @@ def _solve_onsager(rhs, base, valid, E_levels):
 
 
 def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
-                     dChi_dE=None, term_factors=(1.0, 1.0, 1.0)):
+                     dChi_dE=None, term_factors=(1.0, 1.0, 1.0),
+                     Bmultiplier=1.0):
     """
     Solve the Onsager quantization condition for one band.
 
@@ -52,6 +53,9 @@ def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
     term_factors : (3,) tuple of float
         (BC_factor, morb_factor, chi_factor).  Multiplicative prefactors
         on the BC, dL/dE, and chi' terms.  Default (1,1,1).
+    Bmultiplier : float
+        Multiplicative factor on B in the rhs of the Onsager condition.
+        Default 1.0.  Diagnostic/testing parameter.
 
     Returns
     -------
@@ -71,7 +75,7 @@ def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
 
     n_vec = np.arange(nmax + 1).reshape(1, 1, -1)
     B_vec = np.asarray(Blist).reshape(1, -1, 1)
-    rhs = B_vec * (n_vec + 0.5) / PHI0
+    rhs = Bmultiplier * B_vec * (n_vec + 0.5) / PHI0
 
     B2 = B_vec[:, :, 0]
 

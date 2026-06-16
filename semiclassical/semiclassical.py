@@ -185,7 +185,7 @@ def _onsager_bfield_worker(args):
     from isoenergy import isoenergy_areas
     from onsager import onsager_fan_band
 
-    B, nE, nmax, gfactor, term_factors = args
+    B, nE, nmax, gfactor, term_factors, Bmultiplier = args
     shared = _onsager_bfield_shared
 
     E_bands = shared['E_bands']
@@ -224,7 +224,7 @@ def _onsager_bfield_worker(args):
 
         ll_dict = onsager_fan_band(
             [B], nmax, E_levels, area, enclosedBC,
-            np.zeros(nE), term_factors=tf_3)
+            np.zeros(nE), term_factors=tf_3, Bmultiplier=Bmultiplier)
 
         if ll_dict is not None:
             ll_renamed = {}
@@ -250,6 +250,7 @@ def run_onsager_bfield(inp, bs_data):
     nmax = int(inp.get('nmax', 50))
     nE = int(inp['nE'])
     gfactor = float(inp.get('gfactor', 1.0))
+    Bmultiplier = float(inp.get('onsager_Bmultiplier', 1.0))
     isparallel = int(inp.get('isparallel', 0))
     nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
     if nprocs is not None:
@@ -266,10 +267,12 @@ def run_onsager_bfield(inp, bs_data):
     nB = len(Blist)
 
     print(f"  onsager_bfield: {nB} B values, nmax={nmax}, nE={nE}, "
-          f"gfactor={gfactor}, term_factors={term_factors}")
+          f"gfactor={gfactor}, term_factors={term_factors}, "
+          f"Bmultiplier={Bmultiplier}")
 
     result = {'Blist': Blist, 'nmax': nmax, 'nE': nE,
-              'nbands': nbands, 'gfactor': gfactor}
+              'nbands': nbands, 'gfactor': gfactor,
+              'onsager_Bmultiplier': Bmultiplier}
 
     for valley in ('K', 'Kp'):
         shared = {
@@ -279,7 +282,7 @@ def run_onsager_bfield(inp, bs_data):
             'vol_M': vol_M, 'nk1': nk1, 'nk2': nk2,
         }
 
-        args_list = [(B, nE, nmax, gfactor, term_factors) for B in Blist]
+        args_list = [(B, nE, nmax, gfactor, term_factors, Bmultiplier) for B in Blist]
 
         if isparallel:
             import multiprocessing
