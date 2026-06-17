@@ -129,6 +129,8 @@ def run_onsager(inp, iso_data):
         chi_data = load_data(inp['susceptibility_datafile'])
         print(f"  Loaded susceptibility from {inp['susceptibility_datafile']}")
 
+    lifshitz_threshold = float(inp.get('lifshitz_threshold', 50))
+
     print(f"  Onsager: {len(Blist)} B values, nmax={nmax}, term_factors={term_factors}")
 
     result = {'Blist': Blist, 'nmax': nmax}
@@ -160,7 +162,8 @@ def run_onsager(inp, iso_data):
                 iso_data[key],
                 iso_data[f'enclosedBC_{valley}_band{n}'],
                 np.atleast_1d(iso_data[f'dL_dE_{valley}_band{n}']).ravel(),
-                dChi_dE=dChi, term_factors=term_factors)
+                dChi_dE=dChi, term_factors=term_factors,
+                lifshitz_threshold=lifshitz_threshold)
 
             if ll_dict is not None:
                 for suffix, LL in ll_dict.items():
@@ -185,7 +188,7 @@ def _onsager_bfield_worker(args):
     from isoenergy import isoenergy_areas
     from onsager import onsager_fan_band
 
-    B, nE, nmax, gfactor, term_factors, Bmultiplier = args
+    B, nE, nmax, gfactor, term_factors, Bmultiplier, lifshitz_threshold = args
     shared = _onsager_bfield_shared
 
     E_bands = shared['E_bands']
@@ -224,14 +227,16 @@ def _onsager_bfield_worker(args):
 
         ll_dict = onsager_fan_band(
             [B], nmax, E_levels, area, enclosedBC,
-            np.zeros(nE), term_factors=tf_3, Bmultiplier=Bmultiplier)
+            np.zeros(nE), term_factors=tf_3, Bmultiplier=Bmultiplier,
+            lifshitz_threshold=lifshitz_threshold)
 
         if ll_dict is not None:
             ll_renamed = {}
-            if 'S' in ll_dict:
-                ll_renamed['SM'] = ll_dict['S'][0]
-            if 'SB' in ll_dict:
-                ll_renamed['SBM'] = ll_dict['SB'][0]
+            for k, v in ll_dict.items():
+                if k.startswith('S_seg') or k == 'S':
+                    ll_renamed['SM' + k[1:]] = v[0]
+                elif k.startswith('SB_seg') or k == 'SB':
+                    ll_renamed['SBM' + k[2:]] = v[0]
         else:
             ll_renamed = None
 
@@ -266,6 +271,8 @@ def run_onsager_bfield(inp, bs_data):
     nbands = bs_data['E_K'].shape[0]
     nB = len(Blist)
 
+    lifshitz_threshold = float(inp.get('lifshitz_threshold', 50))
+
     print(f"  onsager_bfield: {nB} B values, nmax={nmax}, nE={nE}, "
           f"gfactor={gfactor}, term_factors={term_factors}, "
           f"Bmultiplier={Bmultiplier}")
@@ -282,7 +289,8 @@ def run_onsager_bfield(inp, bs_data):
             'vol_M': vol_M, 'nk1': nk1, 'nk2': nk2,
         }
 
-        args_list = [(B, nE, nmax, gfactor, term_factors, Bmultiplier) for B in Blist]
+        args_list = [(B, nE, nmax, gfactor, term_factors, Bmultiplier,
+                      lifshitz_threshold) for B in Blist]
 
         if isparallel:
             import multiprocessing
@@ -338,7 +346,8 @@ def run_onsager_bfield(inp, bs_data):
 
         n_with_orbits = sum(
             1 for n in range(nbands)
-            if f'LL_{valley}_band{n}_SM' in result)
+            if any(k.startswith(f'LL_{valley}_band{n}_SM')
+                   for k in result))
         print(f"  {valley} valley: {n_with_orbits} bands with orbits")
 
     print("  Done.")

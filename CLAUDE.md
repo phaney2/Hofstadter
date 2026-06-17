@@ -177,6 +177,15 @@ differences — see below.
 5. **`include_chi` flag**: Set `include_chi = 0` in the input file to
    skip the expensive Fukuyama susceptibility loop. Defaults to 1.
 
+6. **Lifshitz segment detection heuristic**: The Onsager solver splits
+   non-monotonic area(E) at Lifshitz transitions using a magnitude-based
+   heuristic (`lifshitz_threshold` × median |ΔA|, default 50). This
+   works but is somewhat arbitrary. A potentially better approach:
+   split at sign changes of dA/dE (local extrema), which is
+   parameter-free and physically motivated. Risk: numerical noise in
+   area(E) could create spurious extrema. Worth revisiting if the
+   threshold needs tuning for different parameter regimes.
+
 ## Documentation requirements
 
 **Any change to `.py` source files MUST include corresponding updates to

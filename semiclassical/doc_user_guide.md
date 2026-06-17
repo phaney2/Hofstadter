@@ -75,6 +75,7 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `susceptibility_datafile` | — | Path to susceptibility `.mat` file (for `onsager` stage with `chiflag=1`) |
 | `gfactor`       | 1       | Orbital moment prefactor for `onsager_bfield`: E_mod = E_K + gfactor×B×Lz_K |
 | `onsager_Bmultiplier` | 1 | Multiplicative factor on B in the Onsager rhs (`onsager_bfield` only). Diagnostic/testing parameter. |
+| `lifshitz_threshold` | 50 | Lifshitz transition detection: a jump in orbit area is flagged when `|ΔA|` exceeds this factor × median `|ΔA|`. Each monotonic segment is solved independently. |
 | `outputfile`    | auto    | Output filename; defaults to `electronic_structure_data_{nk1}.mat` |
 
 ### Onsager quantization terms (`term_factors`)
@@ -278,7 +279,9 @@ within the actual band range rather than spanning the union of both valleys.
 where `{v}` is `K` or `Kp` and `{i}` is the 0-based band index.
 One set of suffixed matrices is saved per band that has closed orbits.
 Entries where the Onsager condition has no valid root (e.g., above the
-band edge) are NaN.
+band edge) are NaN.  When Lifshitz transitions split a band's area
+curve into multiple monotonic segments, keys are further suffixed
+`_seg0`, `_seg1`, etc. (e.g. `LL_K_band5_SBM_seg0`, `LL_K_band5_SBM_seg1`).
 
 ### Onsager_bfield output (`calctype = onsager_bfield`)
 

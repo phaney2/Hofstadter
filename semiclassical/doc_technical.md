@@ -335,6 +335,8 @@ The Onsager step uses its own energy grid (`elist_onsager`, defaults to
 Output keys: `Blist` (nB,), `nmax` (scalar), and per-band cumulative LL
 arrays with suffixes `_S`, `_SB`, `_SBM`, `_SBMC` (e.g.
 `LL_K_band{i}_S`, `LL_K_band{i}_SBM`) for each band with orbits.
+When Lifshitz transitions split a band into multiple segments, keys are
+further suffixed with `_seg0`, `_seg1`, etc. (e.g. `LL_K_band5_SBM_seg1`).
 
 ### Root-finding
 
@@ -354,6 +356,20 @@ axis using two methods in priority order:
    `B(n+½)/φ₀`, the entry is set to NaN. This suppresses spurious roots
    at saddle-point energies where area reaches a maximum but the Onsager
    condition is never truly satisfied.
+
+### Lifshitz transition segmentation
+
+When a band's orbit area A(E) is non-monotonic — e.g. small orbits
+growing into a Lifshitz transition where the orbit topology changes,
+then large orbits shrinking — the Onsager condition can have multiple
+roots at the same (B, n).  Since `_solve_onsager` returns one root per
+(B, n), `onsager_fan_band` splits the area curve at Lifshitz transitions
+and solves each monotonic segment independently.
+
+Detection: a Lifshitz transition is identified where `|ΔA|` between
+adjacent energy grid points exceeds `lifshitz_threshold` (default 50)
+times the median `|ΔA|`.  This is tunable via the `lifshitz_threshold`
+input parameter.
 
 ## Non-perturbative Onsager (`onsager_bfield`)
 
