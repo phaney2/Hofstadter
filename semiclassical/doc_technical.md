@@ -336,18 +336,24 @@ Output keys: `Blist` (nB,), `nmax` (scalar), and per-band cumulative LL
 arrays with suffixes `_S`, `_SB`, `_SBM`, `_SBMC` (e.g.
 `LL_K_band{i}_S`, `LL_K_band{i}_SBM`) for each band with orbits.
 
-### Root validation
+### Root-finding
 
-`_solve_onsager` uses `argmin` over the energy grid, which always returns
-an index even when no true root exists. Without thresholding, the minimum
-residual tends to land at the orbit area maximum (Van Hove singularity /
-saddle point), producing a spurious B-independent "flat" Landau level.
+`_solve_onsager` finds roots of the Onsager condition along the energy
+axis using two methods in priority order:
 
-To suppress these trivial roots, `_solve_onsager` checks whether the best
-residual exceeds `rtol` (default 5%) times the rhs magnitude
-`B(n+½)/φ₀`. If so, the entry is set to NaN. This removes spurious levels
-while preserving all genuine roots where the Onsager condition is
-approximately satisfied.
+1. **Sign-change interpolation** (primary): detects adjacent energy grid
+   points where the Onsager residual changes sign, then linearly
+   interpolates to find the sub-grid-cell zero crossing. This produces
+   continuous LL dispersion curves even when area(E) changes steeply
+   (e.g. near Van Hove singularities), because it only requires the root
+   to fall *between* two grid points rather than *near* one.
+
+2. **Argmin with threshold** (fallback): for (B, n) pairs with no sign
+   change, falls back to `argmin` of the absolute residual. If the best
+   residual exceeds `rtol` (default 5%) times the rhs magnitude
+   `B(n+½)/φ₀`, the entry is set to NaN. This suppresses spurious roots
+   at saddle-point energies where area reaches a maximum but the Onsager
+   condition is never truly satisfied.
 
 ## Non-perturbative Onsager (`onsager_bfield`)
 

@@ -18,14 +18,40 @@ PHI0 = 2 * np.pi * HBAR_SI / EC
 def _solve_onsager(rhs, base, valid, E_levels, rtol=0.05):
     onsager = rhs + base[:, :, np.newaxis]
     onsager[~valid, :, :] = np.inf
+
+    nE = len(E_levels)
+
+    both_finite = np.isfinite(onsager[:-1]) & np.isfinite(onsager[1:])
+    has_crossing = (onsager[:-1] * onsager[1:] < 0) & both_finite
+
+    any_crossing = np.any(has_crossing, axis=0)
+    first_idx = np.argmax(has_crossing, axis=0)
+
+    onsager_clipped = np.where(np.isfinite(onsager), onsager, 0.0)
+
+    f0 = np.take_along_axis(onsager_clipped, first_idx[np.newaxis], axis=0)[0]
+    f1 = np.take_along_axis(
+        onsager_clipped,
+        np.minimum(first_idx + 1, nE - 1)[np.newaxis], axis=0)[0]
+
+    denom = f0 - f1
+    safe_denom = np.where(np.abs(denom) > 0, denom, 1.0)
+    t = np.where(np.abs(denom) > 0, f0 / safe_denom, 0.5)
+    t = np.clip(t, 0.0, 1.0)
+
+    E0 = E_levels[first_idx]
+    E1 = E_levels[np.minimum(first_idx + 1, nE - 1)]
+    result_interp = E0 + t * (E1 - E0)
+
     residual = np.abs(onsager)
     ind = np.argmin(residual, axis=0)
-    best = np.take_along_axis(residual, ind[np.newaxis, :, :], axis=0)[0]
+    best = np.take_along_axis(residual, ind[np.newaxis], axis=0)[0]
     scale = np.abs(rhs[0, :, :])
     scale = np.where(scale > 0, scale, 1.0)
-    result = E_levels[ind]
-    result[best / scale > rtol] = np.nan
-    return result
+    result_argmin = E_levels[ind]
+    result_argmin[best / scale > rtol] = np.nan
+
+    return np.where(any_crossing, result_interp, result_argmin)
 
 
 def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
