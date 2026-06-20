@@ -509,47 +509,56 @@ def do_calc(filepath):
         l12xx_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
         l12xy_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
 
-        bands_K = np.zeros((Nk_tot, nb)) if 'K' in valley else None
-        bands_Kp = np.zeros((Nk_tot, nb)) if 'Kp' in valley else None
+        dos_weight = 1.0 / Nk_tot
+        dos_K = np.zeros(n_mu) if 'K' in valley else None
+        dos_Kp = np.zeros(n_mu) if 'Kp' in valley else None
 
         print(" Entering the k loop (transport)")
+        next_pct = 5
+        done_count = 0
+
+        def _bin_dos(tek, dos_arr):
+            mask = (tek > mulist_meV[0]) & (tek < mulist_meV[-1])
+            in_range = tek[mask]
+            if len(in_range) > 0:
+                bins = np.argmin(np.abs(in_range[:, None] - mulist_meV[None, :]),
+                                 axis=1)
+                for b in bins:
+                    dos_arr[b] += dos_weight
+
+        def _accumulate(kc, sxK, syK, l12xK, l12yK, eK,
+                        sxKp, syKp, l12xKp, l12yKp, eKp):
+            nonlocal done_count, next_pct
+            if sxK is not None:
+                sxx_K_acc[:] += sxK
+                sxy_K_acc[:] += syK
+                l12xx_K_acc[:] += l12xK
+                l12xy_K_acc[:] += l12yK
+                _bin_dos(eK, dos_K)
+            if sxKp is not None:
+                sxx_Kp_acc[:] += sxKp
+                sxy_Kp_acc[:] += syKp
+                l12xx_Kp_acc[:] += l12xKp
+                l12xy_Kp_acc[:] += l12yKp
+                _bin_dos(eKp, dos_Kp)
+            done_count += 1
+            pct = done_count * 100 // Nk_tot
+            if pct >= next_pct:
+                print(f"  {pct}% ({done_count}/{Nk_tot})", flush=True)
+                next_pct = (pct // 5 + 1) * 5
+
         if isparallel:
             nworkers = min(int(d.get('nworkers', cpu_count())), Nk_tot)
             print(f"  (parallel: {nworkers} workers)")
             tasks = [(kc, kpoints[kc, :]) for kc in range(Nk_tot)]
             with Pool(processes=nworkers,
                       initializer=_init_kpoint_worker, initargs=(shared,)) as pool:
-                results = pool.map(_solve_kpoint_transport, tasks)
-            for kc, sxK, syK, l12xK, l12yK, eK, sxKp, syKp, l12xKp, l12yKp, eKp in results:
-                if sxK is not None:
-                    sxx_K_acc += sxK
-                    sxy_K_acc += syK
-                    l12xx_K_acc += l12xK
-                    l12xy_K_acc += l12yK
-                    bands_K[kc, :] = eK
-                if sxKp is not None:
-                    sxx_Kp_acc += sxKp
-                    sxy_Kp_acc += syKp
-                    l12xx_Kp_acc += l12xKp
-                    l12xy_Kp_acc += l12yKp
-                    bands_Kp[kc, :] = eKp
+                for r in pool.imap_unordered(_solve_kpoint_transport, tasks):
+                    _accumulate(*r)
         else:
             for kc in range(Nk_tot):
-                print(f"  |>>        step {kc + 1} of {Nk_tot}")
-                sxK, syK, l12xK, l12yK, eK, sxKp, syKp, l12xKp, l12yKp, eKp = \
-                    _solve_kpoint_transport_core(shared, kpoints[kc, :])
-                if sxK is not None:
-                    sxx_K_acc += sxK
-                    sxy_K_acc += syK
-                    l12xx_K_acc += l12xK
-                    l12xy_K_acc += l12yK
-                    bands_K[kc, :] = eK
-                if sxKp is not None:
-                    sxx_Kp_acc += sxKp
-                    sxy_Kp_acc += syKp
-                    l12xx_Kp_acc += l12xKp
-                    l12xy_Kp_acc += l12yKp
-                    bands_Kp[kc, :] = eKp
+                r = _solve_kpoint_transport_core(shared, kpoints[kc, :])
+                _accumulate(kc, *r)
 
         print(" Done with the k loop")
 
@@ -560,7 +569,7 @@ def do_calc(filepath):
         n_mu = len(mulist_eV)
 
         result = {'calctype': 'transport', 'params': inp,
-                  'mulist': mulist_meV, 'kpoints': kpoints}
+                  'mulist': mulist_meV}
 
         if compute_ref:
             print(f"  Reference mu = {mu_ref_meV} meV (sigma_xy = 0 here)")
@@ -578,7 +587,7 @@ def do_calc(filepath):
                 'sigma_xy_K': sxy_K_acc[:n_mu],
                 'L12_xx_K': l12xx_K_acc[:n_mu],
                 'L12_xy_K': l12xy_K_acc[:n_mu],
-                'bands_K': bands_K,
+                'dos_K': dos_K,
             })
 
         if 'Kp' in valley:
@@ -594,7 +603,7 @@ def do_calc(filepath):
                 'sigma_xy_Kp': sxy_Kp_acc[:n_mu],
                 'L12_xx_Kp': l12xx_Kp_acc[:n_mu],
                 'L12_xy_Kp': l12xy_Kp_acc[:n_mu],
-                'bands_Kp': bands_Kp,
+                'dos_Kp': dos_Kp,
             })
 
         return result
