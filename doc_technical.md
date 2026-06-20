@@ -518,7 +518,10 @@ vy_nm = Psi_sel^dag @ Vy @ Psi_sel
 ```
 
 where `Psi_sel` selects `nbands_transport` bands around charge neutrality
-(or all bands if `nbands_transport = 0`).
+(or all bands if `nbands_transport = 0`).  The eigenvalues `E_K/E_Kp`
+are also stored in the output (shape `(Nk, Nbands)`, meV) at no extra
+cost, since the diagonalization is already required for the transport
+calculation.
 
 ### Kubo formulas
 

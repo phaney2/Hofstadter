@@ -196,6 +196,9 @@ With `layer_resolved = 1` (bilayer only), the output additionally includes:
 | Key | Shape | Units | Description |
 |---|---|---|---|
 | `mulist` | (n_mu,) | meV | Chemical potential grid |
+| `kpoints` | (Nk, 2) | 1/m | k-point coordinates |
+| `bands_K` | (Nk, Nbands) | meV | Sorted eigenvalues, K valley |
+| `bands_Kp` | (Nk, Nbands) | meV | Sorted eigenvalues, K' valley |
 | `sigma_xx_K` | (n_mu,) | e²/h | Longitudinal conductivity, K valley |
 | `sigma_xy_K` | (n_mu,) | e²/h | Hall conductivity, K valley |
 | `L12_xx_K` | (n_mu,) | e²/h × eV | Longitudinal thermoelectric (L12), K valley |
@@ -205,8 +208,10 @@ With `layer_resolved = 1` (bilayer only), the output additionally includes:
 | `L12_xx_Kp` | (n_mu,) | e²/h × eV | Longitudinal thermoelectric (L12), K' valley |
 | `L12_xy_Kp` | (n_mu,) | e²/h × eV | Transverse thermoelectric (L12), K' valley |
 
-Uses the standard interband Kubo formula for sigma_xy (broadened Berry
-curvature) and Kubo-Greenwood formula for sigma_xx (two spectral functions).
+Eigenvalues are always included (computed during the transport k-loop at
+no extra cost).  Uses the standard interband Kubo formula for sigma_xy
+(broadened Berry curvature) and Kubo-Greenwood formula for sigma_xx (two
+spectral functions).
 
 ### Zero-field output
 

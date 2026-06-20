@@ -100,14 +100,60 @@ def _solve_kpoint(args):
 
 
 # ---------------------------------------------------------------------------
-# Transport: per-k-point solver
+# Transport: per-k-point solver with in-worker Kubo summation
 # ---------------------------------------------------------------------------
 
-def _solve_kpoint_transport_core(d, kpt):
-    """Diagonalize H(k) and compute velocity matrix elements for transport.
+def _transport_kubo_single_k(E_meV, vx, vy, d):
+    """Compute per-k-point contribution to transport sums.
 
-    Returns (E_K, vx_K, vy_K, E_Kp, vx_Kp, vy_Kp).
-    Eigenvalues in meV, velocity matrix elements in Ang/s.
+    Returns (sxx, sxy, l12xx, l12xy) each shape (n_mu,).
+    Prefactors (pp, area, 1/Nk) are applied in the caller.
+    """
+    E = E_meV / 1000.0
+    all_mu = d['all_mu_eV']
+    G = d['Gamma_eV']
+    G2 = G * G
+    kT = d['kT_eV']
+
+    vx_sq = np.abs(vx) ** 2
+    Omega = np.imag(vx * np.conj(vy))
+    D2G2 = (E[:, None] - E[None, :]) ** 2 + G2
+    inv_D2G2 = 1.0 / D2G2
+
+    n_mu = len(all_mu)
+    sxx = np.zeros(n_mu)
+    sxy = np.zeros(n_mu)
+    l12xx = np.zeros(n_mu)
+    l12xy = np.zeros(n_mu)
+
+    for i_mu, mu in enumerate(all_mu):
+        if kT > 0:
+            x = (E - mu) / kT
+            x_clip = np.clip(x, -500, 500)
+            f_n = 1.0 / (np.exp(x_clip) + 1.0)
+        else:
+            f_n = (E < mu).astype(float)
+        L = 1.0 / ((E - mu) ** 2 + G2)
+
+        w_xy = f_n[:, None] * Omega * inv_D2G2
+        np.fill_diagonal(w_xy, 0.0)
+        sxy[i_mu] = np.sum(w_xy)
+
+        sxx[i_mu] = L @ vx_sq @ L
+
+        E_avg_mu = (E[:, None] + E[None, :]) / 2.0 - mu
+        l12xy[i_mu] = np.sum(E_avg_mu * w_xy)
+
+        L_outer = L[:, None] * L[None, :]
+        l12xx[i_mu] = np.sum(E_avg_mu * vx_sq * L_outer)
+
+    return sxx, sxy, l12xx, l12xy
+
+
+def _solve_kpoint_transport_core(d, kpt):
+    """Diagonalize H(k), compute velocity elements, and do Kubo sums.
+
+    Returns per-k partial transport arrays (no large matrices cross the pipe).
     """
     kpts = kpt - d['M_mag']
     kx_val, ky_val = kpts
@@ -117,8 +163,10 @@ def _solve_kpoint_transport_core(d, kpt):
     mo = d['moire_offset']
     band_sel = d['transport_band_sel']
 
-    E_K = vx_K = vy_K = None
-    E_Kp = vx_Kp = vy_Kp = None
+    n_mu = len(d['all_mu_eV'])
+    sxx_K = sxy_K = l12xx_K = l12xy_K = None
+    sxx_Kp = sxy_Kp = l12xx_Kp = l12xy_Kp = None
+    E_K = E_Kp = None
 
     if 'K' in d['valley']:
         tphase1 = np.exp(1j * (pp / qq) * kx_val * Lx)
@@ -135,6 +183,8 @@ def _solve_kpoint_transport_core(d, kpt):
         Psi_sel = Psi[:, band_sel]
         vx_K = Psi_sel.conj().T @ d['Vx_K'] @ Psi_sel
         vy_K = Psi_sel.conj().T @ d['Vy_K'] @ Psi_sel
+        sxx_K, sxy_K, l12xx_K, l12xy_K = _transport_kubo_single_k(
+            E_K, vx_K, vy_K, d)
 
     if 'Kp' in d['valley']:
         tphase1 = np.exp(-1j * (pp / qq) * kx_val * Lx)
@@ -151,102 +201,17 @@ def _solve_kpoint_transport_core(d, kpt):
         Psi_sel = Psi[:, band_sel]
         vx_Kp = Psi_sel.conj().T @ d['Vx_Kp'] @ Psi_sel
         vy_Kp = Psi_sel.conj().T @ d['Vy_Kp'] @ Psi_sel
+        sxx_Kp, sxy_Kp, l12xx_Kp, l12xy_Kp = _transport_kubo_single_k(
+            E_Kp, vx_Kp, vy_Kp, d)
 
-    return E_K, vx_K, vy_K, E_Kp, vx_Kp, vy_Kp
+    return (sxx_K, sxy_K, l12xx_K, l12xy_K, E_K,
+            sxx_Kp, sxy_Kp, l12xx_Kp, l12xy_Kp, E_Kp)
 
 
 def _solve_kpoint_transport(args):
     kc, kpt = args
     r = _solve_kpoint_transport_core(_worker_shared, kpt)
     return (kc,) + r
-
-
-# ---------------------------------------------------------------------------
-# Transport: post-processing (Kubo formula)
-# ---------------------------------------------------------------------------
-
-def _compute_transport(E_all, vx_all, vy_all, mulist_eV, Gamma_eV, Nk,
-                       A_m_Ang2, pp, mu_ref_eV=None, kT_eV=0.0):
-    """Compute sigma_xx, sigma_xy, L12_xx, L12_xy vs mu.
-
-    sigma_xy: interband Kubo formula with broadened Berry curvature.
-      Computed relative to a reference chemical potential mu_ref, so that
-      sigma_xy(mu_ref) = 0 by definition.  This cancels the unphysical
-      contribution from deep remote bands in the truncated LL basis.
-
-    sigma_xx: Kubo-Greenwood (two spectral functions), manifestly positive.
-      Includes n=m (Drude).  Not referenced (already well-behaved).
-
-    E_all:    (Nk, nb) eigenvalues in eV
-    vx_all:   list of Nk matrices, each (nb, nb) in Ang/s
-    vy_all:   same
-    mulist_eV: (n_mu,) chemical potentials in eV
-    Gamma_eV:  broadening in eV
-    A_m_Ang2:  magnetic unit cell area in Ang^2
-    pp:        flux denominator (BZ folding factor)
-    mu_ref_eV: reference chemical potential in eV (sigma_xy=0 here)
-    kT_eV:    thermal energy in eV (0 = zero temperature)
-
-    Returns sigma_xx, sigma_xy, L12_xx, L12_xy each shape (n_mu,),
-    in units of e^2/h.
-    """
-    all_mu = list(mulist_eV)
-    compute_ref = mu_ref_eV is not None
-    if compute_ref:
-        all_mu.append(mu_ref_eV)
-    n_all = len(all_mu)
-    all_mu = np.array(all_mu)
-
-    G = Gamma_eV
-    G2 = G * G
-
-    pf_xy = -4.0 * np.pi * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk)
-    pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2 / (A_m_Ang2 * Nk)
-
-    sigma_xx = np.zeros(n_all)
-    sigma_xy = np.zeros(n_all)
-    L12_xx = np.zeros(n_all)
-    L12_xy = np.zeros(n_all)
-
-    for kc in range(Nk):
-        E = E_all[kc, :]
-        vx = vx_all[kc]
-        vy = vy_all[kc]
-
-        nb = len(E)
-        vx_sq = np.abs(vx) ** 2
-        Omega = np.imag(vx * np.conj(vy))
-
-        D2G2 = (E[:, None] - E[None, :]) ** 2 + G2
-        inv_D2G2 = 1.0 / D2G2
-
-        for i_mu, mu in enumerate(all_mu):
-            if kT_eV > 0:
-                x = (E - mu) / kT_eV
-                x_clip = np.clip(x, -500, 500)
-                f_n = 1.0 / (np.exp(x_clip) + 1.0)
-            else:
-                f_n = (E < mu).astype(float)
-            L = 1.0 / ((E - mu) ** 2 + G2)
-
-            w_xy = f_n[:, None] * Omega * inv_D2G2
-            np.fill_diagonal(w_xy, 0.0)
-            sigma_xy[i_mu] += pf_xy * np.sum(w_xy)
-
-            sigma_xx[i_mu] += pf_xx * (L @ vx_sq @ L)
-
-            E_avg_mu = (E[:, None] + E[None, :]) / 2.0 - mu
-            L12_xy[i_mu] += pf_xy * np.sum(E_avg_mu * w_xy)
-
-            L_outer = L[:, None] * L[None, :]
-            L12_xx[i_mu] += pf_xx * np.sum(E_avg_mu * vx_sq * L_outer)
-
-    n_mu = len(mulist_eV)
-    if compute_ref:
-        sigma_xy[:n_mu] -= sigma_xy[n_mu]
-        L12_xy[:n_mu] -= L12_xy[n_mu]
-
-    return sigma_xx[:n_mu], sigma_xy[:n_mu], L12_xx[:n_mu], L12_xy[:n_mu]
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +462,15 @@ def do_calc(filepath):
             Vx_Kp = (1j / HBAR_EV) * (Ax_full_Kp @ H_eV_Kp - H_eV_Kp @ Ax_full_Kp)
             Vy_Kp = (1j / HBAR_EV) * (Ay_full_Kp @ H_eV_Kp - H_eV_Kp @ Ay_full_Kp)
 
-        # --- Pack shared data (meV Hamiltonian, Ang/s velocity) ---
+        # --- Build mu list for Kubo (including mu_ref if set) ---
+        all_mu = list(mulist_eV)
+        compute_ref = mu_ref_eV is not None
+        if compute_ref:
+            all_mu.append(mu_ref_eV)
+        all_mu = np.array(all_mu)
+        n_all = len(all_mu)
+
+        # --- Pack shared data (meV Hamiltonian, Ang/s velocity, Kubo params) ---
         shared = {
             'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
             'gamma': gamma,
@@ -505,6 +478,9 @@ def do_calc(filepath):
             'valley': valley, 'M_mag': M_mag,
             'v0_eye': v0_eye_scaled,
             'transport_band_sel': band_sel,
+            'all_mu_eV': all_mu,
+            'Gamma_eV': Gamma_eV,
+            'kT_eV': kT_eV,
         }
         if 'K' in valley:
             shared.update({
@@ -523,13 +499,18 @@ def do_calc(filepath):
                 'Vx_Kp': Vx_Kp, 'Vy_Kp': Vy_Kp,
             })
 
-        # --- Storage for eigenvalues and velocity matrix elements ---
-        E_K_all = np.zeros((Nk_tot, nb))
-        E_Kp_all = np.zeros((Nk_tot, nb))
-        vx_K_all = [None] * Nk_tot
-        vy_K_all = [None] * Nk_tot
-        vx_Kp_all = [None] * Nk_tot
-        vy_Kp_all = [None] * Nk_tot
+        # --- Accumulators for per-k-point Kubo partial sums ---
+        sxx_K_acc = np.zeros(n_all) if 'K' in valley else None
+        sxy_K_acc = np.zeros(n_all) if 'K' in valley else None
+        l12xx_K_acc = np.zeros(n_all) if 'K' in valley else None
+        l12xy_K_acc = np.zeros(n_all) if 'K' in valley else None
+        sxx_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
+        sxy_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
+        l12xx_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
+        l12xy_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
+
+        bands_K = np.zeros((Nk_tot, nb)) if 'K' in valley else None
+        bands_Kp = np.zeros((Nk_tot, nb)) if 'Kp' in valley else None
 
         print(" Entering the k loop (transport)")
         if isparallel:
@@ -539,59 +520,81 @@ def do_calc(filepath):
             with Pool(processes=nworkers,
                       initializer=_init_kpoint_worker, initargs=(shared,)) as pool:
                 results = pool.map(_solve_kpoint_transport, tasks)
-            for kc, eK, vxK, vyK, eKp, vxKp, vyKp in results:
-                if eK is not None:
-                    E_K_all[kc, :] = eK
-                    vx_K_all[kc] = vxK
-                    vy_K_all[kc] = vyK
-                if eKp is not None:
-                    E_Kp_all[kc, :] = eKp
-                    vx_Kp_all[kc] = vxKp
-                    vy_Kp_all[kc] = vyKp
+            for kc, sxK, syK, l12xK, l12yK, eK, sxKp, syKp, l12xKp, l12yKp, eKp in results:
+                if sxK is not None:
+                    sxx_K_acc += sxK
+                    sxy_K_acc += syK
+                    l12xx_K_acc += l12xK
+                    l12xy_K_acc += l12yK
+                    bands_K[kc, :] = eK
+                if sxKp is not None:
+                    sxx_Kp_acc += sxKp
+                    sxy_Kp_acc += syKp
+                    l12xx_Kp_acc += l12xKp
+                    l12xy_Kp_acc += l12yKp
+                    bands_Kp[kc, :] = eKp
         else:
             for kc in range(Nk_tot):
                 print(f"  |>>        step {kc + 1} of {Nk_tot}")
-                eK, vxK, vyK, eKp, vxKp, vyKp = _solve_kpoint_transport_core(
-                    shared, kpoints[kc, :])
-                if eK is not None:
-                    E_K_all[kc, :] = eK
-                    vx_K_all[kc] = vxK
-                    vy_K_all[kc] = vyK
-                if eKp is not None:
-                    E_Kp_all[kc, :] = eKp
-                    vx_Kp_all[kc] = vxKp
-                    vy_Kp_all[kc] = vyKp
+                sxK, syK, l12xK, l12yK, eK, sxKp, syKp, l12xKp, l12yKp, eKp = \
+                    _solve_kpoint_transport_core(shared, kpoints[kc, :])
+                if sxK is not None:
+                    sxx_K_acc += sxK
+                    sxy_K_acc += syK
+                    l12xx_K_acc += l12xK
+                    l12xy_K_acc += l12yK
+                    bands_K[kc, :] = eK
+                if sxKp is not None:
+                    sxx_Kp_acc += sxKp
+                    sxy_Kp_acc += syKp
+                    l12xx_Kp_acc += l12xKp
+                    l12xy_Kp_acc += l12yKp
+                    bands_Kp[kc, :] = eKp
 
         print(" Done with the k loop")
 
-        # --- Post-processing: compute transport coefficients ---
-        # Eigenvalues are in meV; convert to eV for the Kubo formulas
-        result = {'calctype': 'transport', 'params': inp,
-                  'mulist': mulist_meV}
+        # --- Apply prefactors and mu_ref subtraction ---
+        G2 = Gamma_eV * Gamma_eV
+        pf_xy = -4.0 * np.pi * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk_tot)
+        pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2 / (A_m_Ang2 * Nk_tot)
+        n_mu = len(mulist_eV)
 
-        if mu_ref_eV is not None:
+        result = {'calctype': 'transport', 'params': inp,
+                  'mulist': mulist_meV, 'kpoints': kpoints}
+
+        if compute_ref:
             print(f"  Reference mu = {mu_ref_meV} meV (sigma_xy = 0 here)")
 
         if 'K' in valley:
-            print("  Computing transport coefficients (K)...")
-            sxx_K, sxy_K, l12xx_K, l12xy_K = _compute_transport(
-                E_K_all / 1000.0, vx_K_all, vy_K_all,
-                mulist_eV, Gamma_eV, Nk_tot, A_m_Ang2, pp, mu_ref_eV,
-                kT_eV)
+            sxy_K_acc *= pf_xy
+            sxx_K_acc *= pf_xx
+            l12xy_K_acc *= pf_xy
+            l12xx_K_acc *= pf_xx
+            if compute_ref:
+                sxy_K_acc[:n_mu] -= sxy_K_acc[n_mu]
+                l12xy_K_acc[:n_mu] -= l12xy_K_acc[n_mu]
             result.update({
-                'sigma_xx_K': sxx_K, 'sigma_xy_K': sxy_K,
-                'L12_xx_K': l12xx_K, 'L12_xy_K': l12xy_K,
+                'sigma_xx_K': sxx_K_acc[:n_mu],
+                'sigma_xy_K': sxy_K_acc[:n_mu],
+                'L12_xx_K': l12xx_K_acc[:n_mu],
+                'L12_xy_K': l12xy_K_acc[:n_mu],
+                'bands_K': bands_K,
             })
 
         if 'Kp' in valley:
-            print("  Computing transport coefficients (Kp)...")
-            sxx_Kp, sxy_Kp, l12xx_Kp, l12xy_Kp = _compute_transport(
-                E_Kp_all / 1000.0, vx_Kp_all, vy_Kp_all,
-                mulist_eV, Gamma_eV, Nk_tot, A_m_Ang2, pp, mu_ref_eV,
-                kT_eV)
+            sxy_Kp_acc *= pf_xy
+            sxx_Kp_acc *= pf_xx
+            l12xy_Kp_acc *= pf_xy
+            l12xx_Kp_acc *= pf_xx
+            if compute_ref:
+                sxy_Kp_acc[:n_mu] -= sxy_Kp_acc[n_mu]
+                l12xy_Kp_acc[:n_mu] -= l12xy_Kp_acc[n_mu]
             result.update({
-                'sigma_xx_Kp': sxx_Kp, 'sigma_xy_Kp': sxy_Kp,
-                'L12_xx_Kp': l12xx_Kp, 'L12_xy_Kp': l12xy_Kp,
+                'sigma_xx_Kp': sxx_Kp_acc[:n_mu],
+                'sigma_xy_Kp': sxy_Kp_acc[:n_mu],
+                'L12_xx_Kp': l12xx_Kp_acc[:n_mu],
+                'L12_xy_Kp': l12xy_Kp_acc[:n_mu],
+                'bands_Kp': bands_Kp,
             })
 
         return result
