@@ -1,12 +1,15 @@
 # CLAUDE.md — Development Mode
 
 This project computes moire band structures for mono- or bilayer graphene
-on hBN.  Three calculation modes:
+on hBN.  Four calculation modes:
 
 1. **Hofstadter** (`main_v3.py`): Magnetic Bloch bands in a Landau-level
    basis at rational flux qq/pp.  Uses corrected moire coupling matrices
    (order=[3,1,2], conj=1, psi_conj=1) and doubled real-space unit cell
-   (Nq=qq).  Legacy driver `main_v2.py` is kept for reference.
+   (Nq=qq).  Supports `calctype = 'ek'` (band structure), `'dos'`
+   (density of states), and `'transport'` (Kubo-formula linear response
+   transport coefficients: sigma_xx, sigma_xy, L12_xx, L12_xy vs mu).
+   Legacy driver `main_v2.py` is kept for reference.
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
    expansion along a k-path through the moire BZ.
 3. **Semiclassical** (`semiclassical/`): Full BZ k-mesh band structure

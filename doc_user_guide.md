@@ -87,11 +87,16 @@ variables (e.g., `elist` can use `nebin`).
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `calctype` | string | `'ek'` | `'ek'` = band structure, `'dos'` = density of states |
+| `calctype` | string | `'ek'` | `'ek'` = band structure, `'dos'` = density of states, `'transport'` = Kubo transport coefficients |
 | `valley` | cell | `{'K', 'Kp'}` | Which valleys to compute |
 | `nebin` | int | `1000` | Number of energy bins (for dos mode) |
 | `elist` | array | `linspace(-300,300,nebin)` | Energy grid in meV (for dos mode) |
 | `outputfile` | string | `bands_p{pp}_q{qq}.npz` | Output filename; use `.mat` extension for MATLAB format |
+| `mulist` | array (meV) | `linspace(-50,50,200)` | Chemical potential grid (transport mode only) |
+| `Gamma` | float (meV) | `1.0` | Lorentzian broadening (transport mode only) |
+| `nbands_transport` | int | `0` | Number of bands around charge neutrality for transport sums; 0 = all bands |
+| `kT` | float (meV) | `0.0` | Thermal energy for Fermi-Dirac occupation (transport mode only). 0 = zero temperature (step function). |
+| `mu_ref` | float (meV) | (none) | Reference chemical potential for sigma_xy (transport mode only). When set, sigma_xy is computed relative to this value: sigma_xy(mu_ref) = 0. Place in a spectral gap to get integer-quantized Hall conductivity in neighboring gaps. |
 
 ### Zero-field parameter reference
 
@@ -186,6 +191,23 @@ With `layer_resolved = 1` (bilayer only), the output additionally includes:
 
 `dos_K_top + dos_K_bottom = dos_K` (exact to machine precision).
 
+#### `calctype = 'transport'`
+
+| Key | Shape | Units | Description |
+|---|---|---|---|
+| `mulist` | (n_mu,) | meV | Chemical potential grid |
+| `sigma_xx_K` | (n_mu,) | e²/h | Longitudinal conductivity, K valley |
+| `sigma_xy_K` | (n_mu,) | e²/h | Hall conductivity, K valley |
+| `L12_xx_K` | (n_mu,) | e²/h × eV | Longitudinal thermoelectric (L12), K valley |
+| `L12_xy_K` | (n_mu,) | e²/h × eV | Transverse thermoelectric (L12), K valley |
+| `sigma_xx_Kp` | (n_mu,) | e²/h | Longitudinal conductivity, K' valley |
+| `sigma_xy_Kp` | (n_mu,) | e²/h | Hall conductivity, K' valley |
+| `L12_xx_Kp` | (n_mu,) | e²/h × eV | Longitudinal thermoelectric (L12), K' valley |
+| `L12_xy_Kp` | (n_mu,) | e²/h × eV | Transverse thermoelectric (L12), K' valley |
+
+Uses the standard interband Kubo formula for sigma_xy (broadened Berry
+curvature) and Kubo-Greenwood formula for sigma_xx (two spectral functions).
+
 ### Zero-field output
 
 | Key | Shape | Units | Description |
@@ -225,6 +247,12 @@ elif result['calctype'] == 'dos':
     elist = result['elist']           # energy grid, meV
     dos_K = result['dos_K']           # histogram counts
     dos_Kp = result['dos_Kp']
+
+elif result['calctype'] == 'transport':
+    mulist = result['mulist']             # meV
+    sigma_xy = result['sigma_xy_K']       # e^2/h
+    sigma_xx = result['sigma_xx_K']       # e^2/h
+    L12_xy = result['L12_xy_K']           # e^2/h * eV
 ```
 
 ### Zero-field programmatic usage
@@ -316,6 +344,37 @@ calctype = 'dos';
 valley = {'K', 'Kp'};
 nebin = 1000;
 elist = linspace(-300, 300, nebin);
+```
+
+### Transport coefficients at flux 1/3
+
+```
+isparallel = 1;
+theta = 0.0;
+qq = 1;
+pp = 3;
+g0 = 2796;
+g1 = 340;
+g3 = 0;
+g4 = 0;
+delta = 0;
+v0 = 30;
+v1 = 21;
+w = 110;
+eta = 2;
+U = 0*[1 1];
+nk1 = 10;
+nk2 = 10;
+LL_multiplier = 6;
+Nmax = 1000;
+calctype = 'transport';
+valley = {'K'};
+mulist = linspace(-100, 100, 400);
+Gamma = 2.0;
+kT = 1.0;
+nbands_transport = 0;
+mu_ref = 16.0;
+outputfile = 'transport_p3_q1.mat';
 ```
 
 ### Zero-field bilayer (matching MATLAB benchmark)

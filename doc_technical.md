@@ -486,6 +486,123 @@ provides near-linear speedup since each k-point is independent.
   the k-point solver works entirely in meV.
 
 ---
+
+## 14. Transport coefficients (`calctype = 'transport'`)
+
+Computes the linear-response Kubo-formula transport coefficients
+sigma_xx, sigma_xy, L12_xx, L12_xy as functions of chemical potential mu.
+
+### Velocity operator
+
+The velocity is `v = (i/hbar) [A, H_base]`, where A is the berry
+connection (position operator in the LL basis) and H_base is the
+k-independent BLG kinetic Hamiltonian.  The moire potential V is local
+in position, so `[A, V] = 0` and V does not contribute to the velocity.
+The velocity is therefore k-independent and computed once.
+
+This is the same construction used in `semiclassical/hofstadter_system.py`.
+The berry connection matrices are from `hamiltonian.get_berry_connection_K/Kp`.
+For bilayer, A is block-diagonal: `A_full = diag(A, A)`.
+
+Units: A in Angstrom, H_base in eV, hbar in eV*s → velocity in Ang/s.
+
+### Per-k-point computation
+
+At each k-point, the full Hamiltonian H(k) (in meV) is diagonalized with
+`eigh` to obtain eigenvalues E_n and eigenvectors Psi.  Velocity matrix
+elements are computed in the eigenbasis:
+
+```
+vx_nm = Psi_sel^dag @ Vx @ Psi_sel
+vy_nm = Psi_sel^dag @ Vy @ Psi_sel
+```
+
+where `Psi_sel` selects `nbands_transport` bands around charge neutrality
+(or all bands if `nbands_transport = 0`).
+
+### Kubo formulas
+
+With `D_nm = E_n - E_m`, `G = Gamma` (broadening), `f_n` the occupation
+(Fermi-Dirac at temperature kT, or step function at kT=0):
+
+**sigma_xy** (Hall conductivity):
+
+```
+sigma_xy = -(4*pi*pp*hbar^2) / (A_m * Nk) *
+           sum_{k,n} f_n * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
+```
+
+This is the standard interband Kubo formula.  In the Gamma → 0 limit
+it reduces to the TKNN/Chern number formula: the broadened Berry curvature
+per band is `Omega_n = -2*hbar^2 * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / D_nm^2`,
+and the Chern number is `C_n = (1/2pi) * int Omega_n d^2k`.
+
+**sigma_xx** (longitudinal conductivity, Kubo-Greenwood):
+
+```
+sigma_xx = (4*pp*hbar^2*G^2) / (A_m * Nk) *
+           sum_{k,n,m} |vx_nm|^2 / [(mu-E_n)^2+G^2] / [(mu-E_m)^2+G^2]
+```
+
+This includes the n=m intraband (Drude) contribution.  It is manifestly
+non-negative and vanishes in spectral gaps.
+
+**L12_xx, L12_xy**: Same as sigma_xx/sigma_xy but each term in the sum
+is weighted by `(E_n + E_m)/2 - mu`.
+
+### Prefactor derivation
+
+The prefactor for sigma_xy is derived from the Kubo formula and the
+relation between the magnetic BZ integral and the k-mesh sum:
+
+```
+sigma_xy / (e^2/h) = pp * sum_n f_n * C_n
+C_n = (1/2pi) * (A_MBZ / Nk) * sum_k Omega_n(k)
+    = (2*pi / (A_m_Ang2 * Nk)) * sum_k Omega_n(k)
+```
+
+using `A_MBZ = (2*pi)^2 / A_m_Ang2` (via 1e-20 m^2/Ang^2 conversion).
+
+### BZ folding factor
+
+The magnetic BZ is 1/pp of the full moire BZ.  The k-sum covers only
+the magnetic BZ, so the physical conductivity is pp times the BZ-averaged
+value.  This factor of pp is included in the prefactor.
+
+### Units
+
+- A_m: magnetic unit cell area = pp^2 * uc_area / (2*qq), in Ang^2
+- Eigenvalues from k-loop: meV, converted to eV for the formulas
+- Output sigma: dimensionless (units of e^2/h)
+- Output L12: units of e^2/h * eV
+
+### Reference subtraction (`mu_ref`)
+
+The truncated LL basis produces unphysical Berry curvature in deep
+remote bands.  The absolute cumulative Chern number (summed over all
+occupied bands) therefore has a systematic error.  However, per-band
+Chern numbers for bands near charge neutrality are individually
+quantized to high precision.
+
+When `mu_ref` is set (in meV), the code computes sigma_xy at the
+reference chemical potential and subtracts it:
+
+```
+sigma_xy_out(mu) = sigma_xy_raw(mu) - sigma_xy_raw(mu_ref)
+```
+
+Place `mu_ref` in a spectral gap.  Then sigma_xy in any other gap gives
+the integer Chern number measured relative to that reference, with the
+unphysical remote-band contribution cancelling exactly.  L12_xy is
+similarly referenced.  sigma_xx and L12_xx are not referenced (they are
+already well-behaved).
+
+### Gamma → 0 limit
+
+sigma_xy reduces to the TKNN/Chern number formula.  Quantized plateaus
+of sigma_xy in spectral gaps are a good numerical check.
+
+---
 ---
 
 # Part II: Zero-field (no magnetic field)

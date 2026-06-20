@@ -20,7 +20,10 @@ from parser import parse_input_file
 from basis import getindices
 from hamiltonian import (get_interbilayerterms_K, get_interbilayerterms_Kp,
                          get_intermonolayerH_K, get_intermonolayerH_Kp,
-                         get_intralayerH_K, get_intralayerH_Kp)
+                         get_intralayerH_K, get_intralayerH_Kp,
+                         get_berry_connection_K, get_berry_connection_Kp)
+
+HBAR_EV = 6.582119569e-16  # eV*s
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +97,156 @@ def _solve_kpoint(args):
     kc, kpt = args
     tek_K, tek_Kp, wt_K, wt_Kp = _solve_kpoint_core(_worker_shared, kpt)
     return kc, tek_K, tek_Kp, wt_K, wt_Kp
+
+
+# ---------------------------------------------------------------------------
+# Transport: per-k-point solver
+# ---------------------------------------------------------------------------
+
+def _solve_kpoint_transport_core(d, kpt):
+    """Diagonalize H(k) and compute velocity matrix elements for transport.
+
+    Returns (E_K, vx_K, vy_K, E_Kp, vx_Kp, vy_Kp).
+    Eigenvalues in meV, velocity matrix elements in Ang/s.
+    """
+    kpts = kpt - d['M_mag']
+    kx_val, ky_val = kpts
+    pp, qq = d['pp'], d['qq']
+    Lx, Ly = d['Lx'], d['Ly']
+    gamma = d['gamma']
+    mo = d['moire_offset']
+    band_sel = d['transport_band_sel']
+
+    E_K = vx_K = vy_K = None
+    E_Kp = vx_Kp = vy_Kp = None
+
+    if 'K' in d['valley']:
+        tphase1 = np.exp(1j * (pp / qq) * kx_val * Lx)
+        tphase2 = np.exp(-1j * (pp / qq) * kx_val * Lx / 2) * np.exp(1j * ky_val * Ly * (pp / qq))
+        tphase3 = np.exp(-1j * (pp / qq) * kx_val * Lx / 2) * np.exp(-1j * ky_val * Ly * (pp / qq))
+
+        V_pq = gamma * tphase1 * d['term1_K'] + tphase2 * d['term2_K'] + tphase3 * d['term3_K']
+
+        Htotal_K = d['H_base_K'].copy()
+        Htotal_K[mo:, mo:] += d['v0_eye'] + V_pq + V_pq.T.conj()
+
+        ek, Psi = linalg.eigh(Htotal_K, overwrite_a=True, check_finite=False)
+        E_K = ek[band_sel]
+        Psi_sel = Psi[:, band_sel]
+        vx_K = Psi_sel.conj().T @ d['Vx_K'] @ Psi_sel
+        vy_K = Psi_sel.conj().T @ d['Vy_K'] @ Psi_sel
+
+    if 'Kp' in d['valley']:
+        tphase1 = np.exp(-1j * (pp / qq) * kx_val * Lx)
+        tphase2 = np.exp(1j * (pp / qq) * kx_val * Lx / 2) * np.exp(-1j * ky_val * Ly * (pp / qq))
+        tphase3 = np.exp(1j * (pp / qq) * kx_val * Lx / 2) * np.exp(1j * ky_val * Ly * (pp / qq))
+
+        V_pq = gamma * tphase1 * d['term1_Kp'] + tphase2 * d['term2_Kp'] + tphase3 * d['term3_Kp']
+
+        Htotal_Kp = d['H_base_Kp'].copy()
+        Htotal_Kp[mo:, mo:] += d['v0_eye'] + V_pq + V_pq.T.conj()
+
+        ek, Psi = linalg.eigh(Htotal_Kp, overwrite_a=True, check_finite=False)
+        E_Kp = ek[band_sel]
+        Psi_sel = Psi[:, band_sel]
+        vx_Kp = Psi_sel.conj().T @ d['Vx_Kp'] @ Psi_sel
+        vy_Kp = Psi_sel.conj().T @ d['Vy_Kp'] @ Psi_sel
+
+    return E_K, vx_K, vy_K, E_Kp, vx_Kp, vy_Kp
+
+
+def _solve_kpoint_transport(args):
+    kc, kpt = args
+    r = _solve_kpoint_transport_core(_worker_shared, kpt)
+    return (kc,) + r
+
+
+# ---------------------------------------------------------------------------
+# Transport: post-processing (Kubo formula)
+# ---------------------------------------------------------------------------
+
+def _compute_transport(E_all, vx_all, vy_all, mulist_eV, Gamma_eV, Nk,
+                       A_m_Ang2, pp, mu_ref_eV=None, kT_eV=0.0):
+    """Compute sigma_xx, sigma_xy, L12_xx, L12_xy vs mu.
+
+    sigma_xy: interband Kubo formula with broadened Berry curvature.
+      Computed relative to a reference chemical potential mu_ref, so that
+      sigma_xy(mu_ref) = 0 by definition.  This cancels the unphysical
+      contribution from deep remote bands in the truncated LL basis.
+
+    sigma_xx: Kubo-Greenwood (two spectral functions), manifestly positive.
+      Includes n=m (Drude).  Not referenced (already well-behaved).
+
+    E_all:    (Nk, nb) eigenvalues in eV
+    vx_all:   list of Nk matrices, each (nb, nb) in Ang/s
+    vy_all:   same
+    mulist_eV: (n_mu,) chemical potentials in eV
+    Gamma_eV:  broadening in eV
+    A_m_Ang2:  magnetic unit cell area in Ang^2
+    pp:        flux denominator (BZ folding factor)
+    mu_ref_eV: reference chemical potential in eV (sigma_xy=0 here)
+    kT_eV:    thermal energy in eV (0 = zero temperature)
+
+    Returns sigma_xx, sigma_xy, L12_xx, L12_xy each shape (n_mu,),
+    in units of e^2/h.
+    """
+    all_mu = list(mulist_eV)
+    compute_ref = mu_ref_eV is not None
+    if compute_ref:
+        all_mu.append(mu_ref_eV)
+    n_all = len(all_mu)
+    all_mu = np.array(all_mu)
+
+    G = Gamma_eV
+    G2 = G * G
+
+    pf_xy = -4.0 * np.pi * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk)
+    pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2 / (A_m_Ang2 * Nk)
+
+    sigma_xx = np.zeros(n_all)
+    sigma_xy = np.zeros(n_all)
+    L12_xx = np.zeros(n_all)
+    L12_xy = np.zeros(n_all)
+
+    for kc in range(Nk):
+        E = E_all[kc, :]
+        vx = vx_all[kc]
+        vy = vy_all[kc]
+
+        nb = len(E)
+        vx_sq = np.abs(vx) ** 2
+        Omega = np.imag(vx * np.conj(vy))
+
+        D2G2 = (E[:, None] - E[None, :]) ** 2 + G2
+        inv_D2G2 = 1.0 / D2G2
+
+        for i_mu, mu in enumerate(all_mu):
+            if kT_eV > 0:
+                x = (E - mu) / kT_eV
+                x_clip = np.clip(x, -500, 500)
+                f_n = 1.0 / (np.exp(x_clip) + 1.0)
+            else:
+                f_n = (E < mu).astype(float)
+            L = 1.0 / ((E - mu) ** 2 + G2)
+
+            w_xy = f_n[:, None] * Omega * inv_D2G2
+            np.fill_diagonal(w_xy, 0.0)
+            sigma_xy[i_mu] += pf_xy * np.sum(w_xy)
+
+            sigma_xx[i_mu] += pf_xx * (L @ vx_sq @ L)
+
+            E_avg_mu = (E[:, None] + E[None, :]) / 2.0 - mu
+            L12_xy[i_mu] += pf_xy * np.sum(E_avg_mu * w_xy)
+
+            L_outer = L[:, None] * L[None, :]
+            L12_xx[i_mu] += pf_xx * np.sum(E_avg_mu * vx_sq * L_outer)
+
+    n_mu = len(mulist_eV)
+    if compute_ref:
+        sigma_xy[:n_mu] -= sigma_xy[n_mu]
+        L12_xy[:n_mu] -= L12_xy[n_mu]
+
+    return sigma_xx[:n_mu], sigma_xy[:n_mu], L12_xx[:n_mu], L12_xy[:n_mu]
 
 
 # ---------------------------------------------------------------------------
@@ -281,20 +434,182 @@ def do_calc(filepath):
     print(f"  dim per layer (post-chop) = {dim_MLG}")
     print(f"  dim total = {dim_total}")
 
+    # --- pre-scale and pack shared data for the k-point solver ---
+    scale = 1000 / Q_E
+    v0_eye_scaled = scale * v0 * np.eye(dim_MLG)
+    moire_offset = 0 if nlayers == 1 else dim_MLG
+
+    # =======================================================================
+    # Transport calculation (completely separate k-loop)
+    # =======================================================================
+    if calctype == 'transport':
+        mulist_meV = np.asarray(d.get('mulist', np.linspace(-50, 50, 200)))
+        Gamma_meV = float(d.get('Gamma', 1.0))
+        nbands_transport = int(d.get('nbands_transport', 0))
+        mu_ref_meV = d.get('mu_ref', None)
+        kT_meV = float(d.get('kT', 0.0))
+
+        mulist_eV = mulist_meV / 1000.0
+        Gamma_eV = Gamma_meV / 1000.0
+        kT_eV = kT_meV / 1000.0
+        mu_ref_eV = float(mu_ref_meV) / 1000.0 if mu_ref_meV is not None else None
+        J_to_eV = 1.0 / Q_E
+        m_to_Ang = 1e10
+        A_m_Ang2 = (pp ** 2 * uc_area / (2 * qq)) * m_to_Ang ** 2
+
+        if nbands_transport > 0:
+            idx_c = dim_total // 2
+            nb = nbands_transport
+            band_sel = np.arange(idx_c - nb // 2, idx_c + nb // 2)
+        else:
+            nb = dim_total
+            band_sel = np.arange(dim_total)
+
+        print(f"  Transport: Gamma = {Gamma_meV} meV, kT = {kT_meV} meV, {len(mulist_meV)} mu points, {nb} bands")
+
+        # --- Build velocity operators: v = (i/hbar)[A, H_base] ---
+        # Work in eV / Angstrom / eV*s  →  velocity in Ang/s
+        if 'K' in valley:
+            Ax_K, Ay_K = get_berry_connection_K(N, B, qNslabels_K)
+            if nlayers == 1:
+                Ax_full_K = Ax_K * m_to_Ang
+                Ay_full_K = Ay_K * m_to_Ang
+                H_eV_K = H_base_K * J_to_eV
+            else:
+                zz = np.zeros_like(Ax_K)
+                Ax_full_K = np.block([[Ax_K, zz], [zz, Ax_K]]) * m_to_Ang
+                Ay_full_K = np.block([[Ay_K, zz], [zz, Ay_K]]) * m_to_Ang
+                H_eV_K = H_base_K * J_to_eV
+            Vx_K = (1j / HBAR_EV) * (Ax_full_K @ H_eV_K - H_eV_K @ Ax_full_K)
+            Vy_K = (1j / HBAR_EV) * (Ay_full_K @ H_eV_K - H_eV_K @ Ay_full_K)
+
+        if 'Kp' in valley:
+            Ax_Kp, Ay_Kp = get_berry_connection_Kp(N, B, qNslabels_Kp)
+            if nlayers == 1:
+                Ax_full_Kp = Ax_Kp * m_to_Ang
+                Ay_full_Kp = Ay_Kp * m_to_Ang
+                H_eV_Kp = H_base_Kp * J_to_eV
+            else:
+                zz = np.zeros_like(Ax_Kp)
+                Ax_full_Kp = np.block([[Ax_Kp, zz], [zz, Ax_Kp]]) * m_to_Ang
+                Ay_full_Kp = np.block([[Ay_Kp, zz], [zz, Ay_Kp]]) * m_to_Ang
+                H_eV_Kp = H_base_Kp * J_to_eV
+            Vx_Kp = (1j / HBAR_EV) * (Ax_full_Kp @ H_eV_Kp - H_eV_Kp @ Ax_full_Kp)
+            Vy_Kp = (1j / HBAR_EV) * (Ay_full_Kp @ H_eV_Kp - H_eV_Kp @ Ay_full_Kp)
+
+        # --- Pack shared data (meV Hamiltonian, Ang/s velocity) ---
+        shared = {
+            'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
+            'gamma': gamma,
+            'moire_offset': moire_offset,
+            'valley': valley, 'M_mag': M_mag,
+            'v0_eye': v0_eye_scaled,
+            'transport_band_sel': band_sel,
+        }
+        if 'K' in valley:
+            shared.update({
+                'H_base_K': scale * H_base_K,
+                'term1_K': scale * term1_K,
+                'term2_K': scale * term2_K,
+                'term3_K': scale * term3_K,
+                'Vx_K': Vx_K, 'Vy_K': Vy_K,
+            })
+        if 'Kp' in valley:
+            shared.update({
+                'H_base_Kp': scale * H_base_Kp,
+                'term1_Kp': scale * term1_Kp,
+                'term2_Kp': scale * term2_Kp,
+                'term3_Kp': scale * term3_Kp,
+                'Vx_Kp': Vx_Kp, 'Vy_Kp': Vy_Kp,
+            })
+
+        # --- Storage for eigenvalues and velocity matrix elements ---
+        E_K_all = np.zeros((Nk_tot, nb))
+        E_Kp_all = np.zeros((Nk_tot, nb))
+        vx_K_all = [None] * Nk_tot
+        vy_K_all = [None] * Nk_tot
+        vx_Kp_all = [None] * Nk_tot
+        vy_Kp_all = [None] * Nk_tot
+
+        print(" Entering the k loop (transport)")
+        if isparallel:
+            nworkers = min(int(d.get('nworkers', cpu_count())), Nk_tot)
+            print(f"  (parallel: {nworkers} workers)")
+            tasks = [(kc, kpoints[kc, :]) for kc in range(Nk_tot)]
+            with Pool(processes=nworkers,
+                      initializer=_init_kpoint_worker, initargs=(shared,)) as pool:
+                results = pool.map(_solve_kpoint_transport, tasks)
+            for kc, eK, vxK, vyK, eKp, vxKp, vyKp in results:
+                if eK is not None:
+                    E_K_all[kc, :] = eK
+                    vx_K_all[kc] = vxK
+                    vy_K_all[kc] = vyK
+                if eKp is not None:
+                    E_Kp_all[kc, :] = eKp
+                    vx_Kp_all[kc] = vxKp
+                    vy_Kp_all[kc] = vyKp
+        else:
+            for kc in range(Nk_tot):
+                print(f"  |>>        step {kc + 1} of {Nk_tot}")
+                eK, vxK, vyK, eKp, vxKp, vyKp = _solve_kpoint_transport_core(
+                    shared, kpoints[kc, :])
+                if eK is not None:
+                    E_K_all[kc, :] = eK
+                    vx_K_all[kc] = vxK
+                    vy_K_all[kc] = vyK
+                if eKp is not None:
+                    E_Kp_all[kc, :] = eKp
+                    vx_Kp_all[kc] = vxKp
+                    vy_Kp_all[kc] = vyKp
+
+        print(" Done with the k loop")
+
+        # --- Post-processing: compute transport coefficients ---
+        # Eigenvalues are in meV; convert to eV for the Kubo formulas
+        result = {'calctype': 'transport', 'params': inp,
+                  'mulist': mulist_meV}
+
+        if mu_ref_eV is not None:
+            print(f"  Reference mu = {mu_ref_meV} meV (sigma_xy = 0 here)")
+
+        if 'K' in valley:
+            print("  Computing transport coefficients (K)...")
+            sxx_K, sxy_K, l12xx_K, l12xy_K = _compute_transport(
+                E_K_all / 1000.0, vx_K_all, vy_K_all,
+                mulist_eV, Gamma_eV, Nk_tot, A_m_Ang2, pp, mu_ref_eV,
+                kT_eV)
+            result.update({
+                'sigma_xx_K': sxx_K, 'sigma_xy_K': sxy_K,
+                'L12_xx_K': l12xx_K, 'L12_xy_K': l12xy_K,
+            })
+
+        if 'Kp' in valley:
+            print("  Computing transport coefficients (Kp)...")
+            sxx_Kp, sxy_Kp, l12xx_Kp, l12xy_Kp = _compute_transport(
+                E_Kp_all / 1000.0, vx_Kp_all, vy_Kp_all,
+                mulist_eV, Gamma_eV, Nk_tot, A_m_Ang2, pp, mu_ref_eV,
+                kT_eV)
+            result.update({
+                'sigma_xx_Kp': sxx_Kp, 'sigma_xy_Kp': sxy_Kp,
+                'L12_xx_Kp': l12xx_Kp, 'L12_xy_Kp': l12xy_Kp,
+            })
+
+        return result
+
+    # =======================================================================
+    # Standard ek / dos calculation (existing code)
+    # =======================================================================
+
     bands_K = np.zeros((Nk_tot, dim_total))
     bands_Kp = np.zeros((Nk_tot, dim_total))
     if layer_resolved:
         weights_K = np.zeros((Nk_tot, dim_total))
         weights_Kp = np.zeros((Nk_tot, dim_total))
 
-    # --- pre-scale and pack shared data for the k-point solver ---
-    scale = 1000 / Q_E
-    v0_eye_scaled = scale * v0 * np.eye(dim_MLG)
-
     shared = {
         'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
         'gamma': gamma,
-        'moire_offset': 0 if nlayers == 1 else dim_MLG,
+        'moire_offset': moire_offset,
         'valley': valley, 'M_mag': M_mag,
         'v0_eye': v0_eye_scaled,
         'layer_resolved': layer_resolved,
