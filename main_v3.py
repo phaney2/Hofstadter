@@ -141,11 +141,16 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
 
         sxx[i_mu] = L @ vx_sq @ L
 
-        E_avg_mu = (E[:, None] + E[None, :]) / 2.0 - mu
-        l12xy[i_mu] = np.sum(E_avg_mu * w_xy)
+        E_mu = E - mu
+        if kT > 0:
+            dfn = (1.0 / kT) * f_n * (1.0 - f_n)
+        else:
+            dfn = L / np.pi
+        w_l12xy = (E_mu * dfn)[:, None] * Omega * inv_D2G2
+        np.fill_diagonal(w_l12xy, 0.0)
+        l12xy[i_mu] = np.sum(w_l12xy)
 
-        L_outer = L[:, None] * L[None, :]
-        l12xx[i_mu] = np.sum(E_avg_mu * vx_sq * L_outer)
+        l12xx[i_mu] = (E_mu * L) @ vx_sq @ L
 
     return sxx, sxy, l12xx, l12xy
 

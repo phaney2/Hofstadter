@@ -549,8 +549,29 @@ sigma_xx = (4*pp*hbar^2*G^2) / (A_m * Nk) *
 This includes the n=m intraband (Drude) contribution.  It is manifestly
 non-negative and vanishes in spectral gaps.
 
-**L12_xx, L12_xy**: Same as sigma_xx/sigma_xy but each term in the sum
-is weighted by `(E_n + E_m)/2 - mu`.
+**L12_xx** (longitudinal thermoelectric coefficient):
+
+```
+L12_xx = (4*pp*hbar^2*G^2) / (A_m * Nk) *
+         sum_{k,n,m} (E_n - mu) * |vx_nm|^2 / [(mu-E_n)^2+G^2] / [(mu-E_m)^2+G^2]
+```
+
+Same Kubo-Greenwood kernel as sigma_xx, but each term is weighted by
+`(E_n - mu)`.  The factor `(E_n - mu) / [(mu-E_n)^2 + G^2]` is an odd
+function of `(E_n - mu)`, so L12_xx captures the derivative-like structure
+of sigma_xx and satisfies the Mott relation `L12 ~ -(pi^2/3)(kT)^2 dsigma/dmu`
+at low temperature.
+
+**L12_xy** (transverse thermoelectric coefficient):
+
+```
+L12_xy = -(4*pi*pp*hbar^2) / (A_m * Nk) *
+         sum_{k,n} (E_n - mu) * (-df/dE_n) * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
+```
+
+Same interband Kubo kernel as sigma_xy, but `f_n` is replaced by
+`(E_n - mu) * (-df/dE_n)`.  At finite kT, `-df/dE = (1/kT) f(1-f)`.
+At kT=0, `-df/dE` is approximated by a Lorentzian `L_n / pi`.
 
 ### Prefactor derivation
 
