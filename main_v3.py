@@ -500,6 +500,7 @@ def do_calc(filepath):
             })
 
         # --- Accumulators for per-k-point Kubo partial sums ---
+        n_mu = len(mulist_eV)
         sxx_K_acc = np.zeros(n_all) if 'K' in valley else None
         sxy_K_acc = np.zeros(n_all) if 'K' in valley else None
         l12xx_K_acc = np.zeros(n_all) if 'K' in valley else None
@@ -566,7 +567,6 @@ def do_calc(filepath):
         G2 = Gamma_eV * Gamma_eV
         pf_xy = -4.0 * np.pi * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk_tot)
         pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2 / (A_m_Ang2 * Nk_tot)
-        n_mu = len(mulist_eV)
 
         result = {'calctype': 'transport', 'params': inp,
                   'mulist': mulist_meV}
