@@ -566,7 +566,8 @@ def do_calc(filepath):
                 next_pct = (pct // 5 + 1) * 5
 
         if isparallel:
-            nworkers = min(int(d.get('nworkers', cpu_count())), Nk_tot)
+            default_nw = int(os.environ.get('SLURM_CPUS_PER_TASK', cpu_count()))
+            nworkers = min(int(d.get('nworkers', default_nw)), Nk_tot)
             print(f"  (parallel: {nworkers} workers)")
             tasks = [(kc, kpoints[kc, :]) for kc in range(Nk_tot)]
             with Pool(processes=nworkers,
@@ -661,7 +662,8 @@ def do_calc(filepath):
 
     print(" Entering the k loop")
     if isparallel:
-        nworkers = min(int(d.get('nworkers', cpu_count())), Nk_tot)
+        default_nw = int(os.environ.get('SLURM_CPUS_PER_TASK', cpu_count()))
+        nworkers = min(int(d.get('nworkers', default_nw)), Nk_tot)
         print(f"  (parallel: {nworkers} workers)")
         tasks = [(kc, kpoints[kc, :]) for kc in range(Nk_tot)]
         with Pool(processes=nworkers,
