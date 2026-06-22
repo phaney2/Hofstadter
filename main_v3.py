@@ -153,11 +153,11 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
             x_eps_clip = np.clip(x_eps, -500, 500)
             f_eps = 1.0 / (np.exp(x_eps_clip) + 1.0)
             neg_dfde = (1.0 / kT) * f_eps * (1.0 - f_eps)
-            sxx[i_mu] = np.trapz(neg_dfde * Phi_xx, eps_grid)
-            sxy[i_mu] = np.trapz(neg_dfde * Phi_xy, eps_grid)
-            l12xx[i_mu] = np.trapz((eps_grid - mu) * neg_dfde * Phi_xx,
+            sxx[i_mu] = np.trapezoid(neg_dfde * Phi_xx, eps_grid)
+            sxy[i_mu] = np.trapezoid(neg_dfde * Phi_xy, eps_grid)
+            l12xx[i_mu] = np.trapezoid((eps_grid - mu) * neg_dfde * Phi_xx,
                                    eps_grid)
-            l12xy[i_mu] = np.trapz((eps_grid - mu) * neg_dfde * Phi_xy,
+            l12xy[i_mu] = np.trapezoid((eps_grid - mu) * neg_dfde * Phi_xy,
                                    eps_grid)
         else:
             L = 1.0 / ((E - mu) ** 2 + G2)
