@@ -549,29 +549,36 @@ sigma_xx = (4*pp*hbar^2*G^2) / (A_m * Nk) *
 This includes the n=m intraband (Drude) contribution.  It is manifestly
 non-negative and vanishes in spectral gaps.
 
-**L12_xx** (longitudinal thermoelectric coefficient):
+**L12_xx** (longitudinal thermoelectric coefficient, Mott relation):
 
 ```
-L12_xx = (4*pp*hbar^2*G^2) / (A_m * Nk) *
-         sum_{k,n,m} (E_n - mu) * |vx_nm|^2 / [(mu-E_n)^2+G^2] / [(mu-E_m)^2+G^2]
+L12_xx = (pi^2/3) * kT^2 * d(sigma_xx)/d(mu)
 ```
 
-Same Kubo-Greenwood kernel as sigma_xx, but each term is weighted by
-`(E_n - mu)`.  The factor `(E_n - mu) / [(mu-E_n)^2 + G^2]` is an odd
-function of `(E_n - mu)`, so L12_xx captures the derivative-like structure
-of sigma_xx and satisfies the Mott relation `L12 ~ -(pi^2/3)(kT)^2 dsigma/dmu`
-at low temperature.
+where the analytical derivative of sigma_xx uses
+`dL_n/dmu = 2*(E_n - mu) * L_n^2`:
+
+```
+d(sigma_xx)/d(mu) = 2 * sum_{k,n,m} dL_n/dmu * |vx_nm|^2 * L_m
+```
+
+(factor of 2 from n<->m symmetry of |v_nm|^2).  The `dL_n/dmu` kernel
+falls off as `1/(E_n-mu)^3`, so it is sharply localized near mu and
+captures the oscillatory structure of sigma_xx.  At kT=0, L12_xx is
+identically zero (no thermoelectric effect without thermal broadening).
 
 **L12_xy** (transverse thermoelectric coefficient):
 
 ```
-L12_xy = -(4*pi*pp*hbar^2) / (A_m * Nk) *
-         sum_{k,n} (E_n - mu) * (-df/dE_n) * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
+L12_xy = pf_xy * sum_{k,n} I_n * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
 ```
 
 Same interband Kubo kernel as sigma_xy, but `f_n` is replaced by
-`(E_n - mu) * (-df/dE_n)`.  At finite kT, `-df/dE = (1/kT) f(1-f)`.
-At kT=0, `-df/dE` is approximated by a Lorentzian `L_n / pi`.
+`I_n = (E_n - mu)*f_n + kT*ln(1 + exp(-(E_n-mu)/kT))`.  This kernel
+is derived by integration by parts from `int_{E_n}^inf (eps-mu)*(-df/deps) deps`.
+`I_n` is bell-shaped with width ~kT centered at mu, vanishing for both
+deeply occupied and unoccupied states.  At kT=0, `I_n = 0` for all
+states, so L12_xy is identically zero.
 
 ### Prefactor derivation
 
