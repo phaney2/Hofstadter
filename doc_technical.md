@@ -527,58 +527,41 @@ diagonalization is already required for the transport calculation.
 With `D_nm = E_n - E_m`, `G = Gamma` (broadening), `f_n` the occupation
 (Fermi-Dirac at temperature kT, or step function at kT=0):
 
-**sigma_xy** (Hall conductivity):
+All four transport coefficients (sigma_xx, sigma_xy, L12_xx, L12_xy) are
+thermal convolutions of spectral functions Phi(eps):
 
 ```
-sigma_xy = -(4*pi*pp*hbar^2) / (A_m * Nk) *
-           sum_{k,n} f_n * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
+sigma(mu) = pf * int deps (-df/deps) Phi(eps)
+L12(mu)   = pf * int deps (-df/deps) (eps - mu) Phi(eps)
 ```
 
-This is the standard interband Kubo formula.  In the Gamma → 0 limit
-it reduces to the TKNN/Chern number formula: the broadened Berry curvature
-per band is `Omega_n = -2*hbar^2 * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / D_nm^2`,
+**Phi_xx** (longitudinal spectral conductivity):
+
+```
+Phi_xx(eps) = sum_{k,n,m} |vx_nm|^2 * A_n(eps) * A_m(eps)
+```
+
+where `A_n(eps) = 1 / [(eps - E_n)^2 + G^2]` is the spectral weight of
+eigenstate n at energy eps.  Includes the n=m intraband (Drude)
+contribution.  Manifestly non-negative and vanishes in spectral gaps.
+
+**Phi_xy** (Hall spectral function):
+
+```
+Phi_xy(eps) = sum_{k, E_n < eps} K_n
+K_n = sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
+```
+
+Cumulative sum of per-eigenstate Berry curvature kernels.  In the
+Gamma → 0 limit the broadened Berry curvature per band is
+`Omega_n = -2*hbar^2 * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / D_nm^2`,
 and the Chern number is `C_n = (1/2pi) * int Omega_n d^2k`.
 
-**sigma_xx** (longitudinal conductivity, Kubo-Greenwood):
-
-```
-sigma_xx = (4*pp*hbar^2*G^2) / (A_m * Nk) *
-           sum_{k,n,m} |vx_nm|^2 / [(mu-E_n)^2+G^2] / [(mu-E_m)^2+G^2]
-```
-
-This includes the n=m intraband (Drude) contribution.  It is manifestly
-non-negative and vanishes in spectral gaps.
-
-**L12_xx** (longitudinal thermoelectric coefficient, Mott relation):
-
-```
-L12_xx = (pi^2/3) * kT^2 * d(sigma_xx)/d(mu)
-```
-
-where the analytical derivative of sigma_xx uses
-`dL_n/dmu = 2*(E_n - mu) * L_n^2`:
-
-```
-d(sigma_xx)/d(mu) = 2 * sum_{k,n,m} dL_n/dmu * |vx_nm|^2 * L_m
-```
-
-(factor of 2 from n<->m symmetry of |v_nm|^2).  The `dL_n/dmu` kernel
-falls off as `1/(E_n-mu)^3`, so it is sharply localized near mu and
-captures the oscillatory structure of sigma_xx.  At kT=0, L12_xx is
-identically zero (no thermoelectric effect without thermal broadening).
-
-**L12_xy** (transverse thermoelectric coefficient):
-
-```
-L12_xy = pf_xy * sum_{k,n} I_n * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
-```
-
-Same interband Kubo kernel as sigma_xy, but `f_n` is replaced by
-`I_n = (E_n - mu)*f_n + kT*ln(1 + exp(-(E_n-mu)/kT))`.  This kernel
-is derived by integration by parts from `int_{E_n}^inf (eps-mu)*(-df/deps) deps`.
-`I_n` is bell-shaped with width ~kT centered at mu, vanishing for both
-deeply occupied and unoccupied states.  At kT=0, `I_n = 0` for all
-states, so L12_xy is identically zero.
+Both Phi are computed once per k-point on a fine energy grid spanning
+all mu values.  The per-mu integrals are cheap 1D quadratures (trapz).
+At kT=0, `(-df/deps) = delta(eps-mu)`, so `sigma = Phi(mu)` and
+`L12 = 0`.  Fast paths are used in this limit: `L @ vx_sq @ L` for
+sigma_xx, `sum K_n[E_n < mu]` for sigma_xy.
 
 ### Prefactor derivation
 

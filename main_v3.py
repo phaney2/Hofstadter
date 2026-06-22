@@ -126,29 +126,43 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     l12xx = np.zeros(n_mu)
     l12xy = np.zeros(n_mu)
 
+    K_xy = Omega * inv_D2G2
+    np.fill_diagonal(K_xy, 0.0)
+    K_n = np.sum(K_xy, axis=1)
+
+    if kT > 0:
+        margin = 10.0 * kT
+        eps_lo = all_mu.min() - margin
+        eps_hi = all_mu.max() + margin
+        d_eps = min(G, kT) / 5.0
+        n_eps = max(int(np.ceil((eps_hi - eps_lo) / d_eps)) + 1, 50)
+        eps_grid = np.linspace(eps_lo, eps_hi, n_eps)
+
+        L_all = 1.0 / ((eps_grid[:, None] - E[None, :]) ** 2 + G2)
+        Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1)
+
+        sort_idx = np.argsort(E)
+        E_sorted = E[sort_idx]
+        K_cumsum = np.concatenate(([0.0], np.cumsum(K_n[sort_idx])))
+        bins = np.searchsorted(E_sorted, eps_grid, side='right')
+        Phi_xy = K_cumsum[bins]
+
     for i_mu, mu in enumerate(all_mu):
         if kT > 0:
-            x = (E - mu) / kT
-            x_clip = np.clip(x, -500, 500)
-            f_n = 1.0 / (np.exp(x_clip) + 1.0)
+            x_eps = (eps_grid - mu) / kT
+            x_eps_clip = np.clip(x_eps, -500, 500)
+            f_eps = 1.0 / (np.exp(x_eps_clip) + 1.0)
+            neg_dfde = (1.0 / kT) * f_eps * (1.0 - f_eps)
+            sxx[i_mu] = np.trapz(neg_dfde * Phi_xx, eps_grid)
+            sxy[i_mu] = np.trapz(neg_dfde * Phi_xy, eps_grid)
+            l12xx[i_mu] = np.trapz((eps_grid - mu) * neg_dfde * Phi_xx,
+                                   eps_grid)
+            l12xy[i_mu] = np.trapz((eps_grid - mu) * neg_dfde * Phi_xy,
+                                   eps_grid)
         else:
-            f_n = (E < mu).astype(float)
-        L = 1.0 / ((E - mu) ** 2 + G2)
-
-        w_xy = f_n[:, None] * Omega * inv_D2G2
-        np.fill_diagonal(w_xy, 0.0)
-        sxy[i_mu] = np.sum(w_xy)
-
-        sxx[i_mu] = L @ vx_sq @ L
-
-        E_mu = E - mu
-        if kT > 0:
-            dL = 2.0 * E_mu * L * L
-            l12xx[i_mu] = (np.pi**2 / 3.0) * kT**2 * 2.0 * (dL @ vx_sq @ L)
-            I_n = E_mu * f_n + kT * np.logaddexp(0.0, -x_clip)
-            w_l12xy = I_n[:, None] * Omega * inv_D2G2
-            np.fill_diagonal(w_l12xy, 0.0)
-            l12xy[i_mu] = np.sum(w_l12xy)
+            L = 1.0 / ((E - mu) ** 2 + G2)
+            sxx[i_mu] = L @ vx_sq @ L
+            sxy[i_mu] = np.sum(K_n[E < mu])
 
     return sxx, sxy, l12xx, l12xy
 
