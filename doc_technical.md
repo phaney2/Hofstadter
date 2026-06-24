@@ -391,9 +391,21 @@ Q_E        = 1.6e-19     C
 A_GRAPHENE = 2.46e-10    m
 A_HBN      = 2.504e-10   m
 vF         = 1e6         m/s  (Fermi velocity, default)
-psi        = +0.29       rad  (hBN moire coupling phase)
+psi        = +0.29       rad  (hBN moire coupling phase, default)
+psi_swap   = +2.386      rad  (hBN B/N swapped, from Eq. 18 with V_N <-> V_B)
 w          = exp(-i*2pi/3)    (sublattice phase rotation)
+V_N        = -1.40       eV   (nitrogen second-order potential, Moon & Koshino)
+V_B        = +3.34       eV   (boron second-order potential, Moon & Koshino)
 ```
+
+The `hbn_swap` parameter (default 0) recomputes psi from Moon & Koshino
+PRB 87, 205404 (2013), Eq. 18 with V_N and V_B interchanged.  This models
+a 60°-rotated hBN alignment where boron and nitrogen sublattice positions
+are swapped relative to the graphene.  The scalar potential V0 and
+modulation amplitude |V1| are unchanged (symmetric under the swap), but
+the phase psi shifts from +0.29 to +2.386 rad.  This flips the sign of
+the effective sublattice mass M^eff, moving the n=0,1 Landau levels from
+one side of the gap to the other.
 
 ---
 

@@ -82,6 +82,7 @@ variables (e.g., `elist` can use `nebin`).
 | `isparallel` | int | `1` | 0 = serial, 1 = parallel k-loop |
 | `layer_resolved` | int | `0` | 1 = compute per-eigenstate layer weights (bilayer only; uses `eigh` instead of `eigvalsh`) |
 | `stacking_type` | int | `2` | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). See Moon & Koshino, PRB 90, 155406 (2014), Eqs. 25 and B1. Ignored for monolayer. |
+| `hbn_swap` | int | `0` | hBN alignment: 0 = default (psi=+0.29), 1 = B/N swapped (60°-rotated hBN). Recomputes the moire coupling phase psi from Moon & Koshino Eq. 18 with V_N and V_B interchanged, flipping the effective mass term and moving the n=0,1 Landau levels to the opposite side of the gap. |
 
 #### Output control
 
@@ -122,6 +123,7 @@ variables (e.g., `elist` can use `nebin`).
 | `dk` | float (1/A) | `5e-4` | k-point spacing along the path |
 | `valley` | cell | `{'K', 'Kp'}` | Which valleys to compute |
 | `stacking_type` | int | `2` | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). Ignored for monolayer. |
+| `hbn_swap` | int | `0` | hBN alignment: 0 = default, 1 = B/N swapped (60°-rotated hBN). See Hofstadter parameter table for details. |
 | `outputfile` | string | `bands_zerofield.npz` | Output filename |
 
 ---
@@ -190,6 +192,14 @@ With `layer_resolved = 1` (bilayer only), the output additionally includes:
 | `dos_Kp_bottom` | (nebin,) | counts | Bottom-layer-weighted DOS, K' valley |
 
 `dos_K_top + dos_K_bottom = dos_K` (exact to machine precision).
+
+**DOS normalization**: The DOS arrays are normalized so that each
+eigenvalue contributes `1/Nk_tot` to its bin (i.e., the sum over all bins
+and bands equals the number of bands). To convert to a physical density
+of states per unit area, multiply by `1 / (A_uc * pp)`, where `A_uc` is
+the moire unit cell area and `pp` is the flux denominator. This accounts
+for the magnetic zone folding that maps the moire BZ onto the physical
+magnetic BZ.
 
 #### `calctype = 'transport'`
 

@@ -489,6 +489,11 @@ def do_calc(filepath):
     V0_meV   = float(inp.get('v0', inp.get('V0')))
     V1_meV   = float(inp.get('v1', inp.get('V1')))
     psi      = float(inp.get('moire_psi', 0.29))
+    hbn_swap = int(inp.get('hbn_swap', 0))
+    if hbn_swap:
+        V_N, V_B = -1.40, 3.34
+        omega = np.exp(-2j * np.pi / 3)
+        psi = -np.angle(-(1 / V_B + omega / V_N))
     eta      = float(inp['eta'])
     ispar    = int(inp.get('isparallel', 0))
     nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))

@@ -291,6 +291,7 @@ def do_calc(filepath):
     if layer_resolved and nlayers == 1:
         layer_resolved = 0
     stacking_type = int(d.get('stacking_type', 2))
+    hbn_swap = int(d.get('hbn_swap', 0))
 
     if calctype == 'spectrum':
         calctype = 'dos'
@@ -338,7 +339,7 @@ def do_calc(filepath):
     if 'K' in valley:
         print("  Building K-valley Hamiltonian...")
         term1_K, term2_K, term3_K, qNslabels_K = get_interbilayerterms_K(
-            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta)
+            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta, hbn_swap)
         Hintra_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'A')
 
         dl = Hintra_K.shape[0]
@@ -367,7 +368,7 @@ def do_calc(filepath):
     if 'Kp' in valley:
         print("  Building K'-valley Hamiltonian...")
         term1_Kp, term2_Kp, term3_Kp, qNslabels_Kp = get_interbilayerterms_Kp(
-            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta)
+            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta, hbn_swap)
         Hintra_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'A')
 
         dl = Hintra_Kp.shape[0]
@@ -406,6 +407,7 @@ def do_calc(filepath):
     n22 = n2grid.flatten(order='F')
 
     vb = np.array([b1 / pp, b2 * qq / pp])
+
     kpoints = np.zeros((Nk_tot, 2))
     for j in range(Nk_tot):
         frac = np.array([n11[j] / nk1, n22[j] / nk2])

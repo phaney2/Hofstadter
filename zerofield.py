@@ -15,7 +15,20 @@ from scipy import linalg
 from constants import A_GRAPHENE, A_HBN
 from parser import parse_input_file
 
-PSI = -0.29
+PSI_DEFAULT = -0.29
+
+
+def _get_psi_zerofield(hbn_swap):
+    """Return the moire coupling phase in zero-field convention (default -0.29).
+
+    When hbn_swap=1, recompute from Moon & Koshino Eq. 18 with V_N <-> V_B.
+    """
+    if hbn_swap:
+        V_N, V_B = -1.40, 3.34
+        omega = np.exp(-2j * np.pi / 3)
+        z_swap = -(1 / V_B + omega / V_N)
+        return np.angle(z_swap)
+    return PSI_DEFAULT
 
 
 def _compute_moire_vectors(theta, a, a_hBN):
@@ -60,20 +73,20 @@ def _build_qvectors(NQ, q1, q2):
     return Q_arr[order], idx_arr[order], len(Q_arr)
 
 
-def _build_coupling_matrices_K(V0, V1):
+def _build_coupling_matrices_K(V0, V1, psi=PSI_DEFAULT):
     w = np.exp(1j * 2 * np.pi / 3)
     T0 = V0 * np.eye(2)
-    ph = V1 * np.exp(1j * PSI)
+    ph = V1 * np.exp(1j * psi)
     T1 = ph * np.array([[1, w**(-1)], [1, w**(-1)]])
     T2 = ph * np.array([[1, w], [w, w**(-1)]])
     T3 = ph * np.array([[1, 1], [w**(-1), w**(-1)]])
     return T0, T1, T2, T3
 
 
-def _build_coupling_matrices_Kp(V0, V1):
+def _build_coupling_matrices_Kp(V0, V1, psi=PSI_DEFAULT):
     w = np.exp(1j * 2 * np.pi / 3)
     T0 = V0 * np.eye(2)
-    ph = V1 * np.exp(-1j * PSI)
+    ph = V1 * np.exp(-1j * psi)
     T1 = ph * np.array([[1, w], [1, w]])
     T2 = ph * np.array([[1, w**(-1)], [w**(-1), w]])
     T3 = ph * np.array([[1, 1], [w, w]])
@@ -257,6 +270,7 @@ def do_calc(filepath):
     dk = inp.get('dk', 5e-4)
     valley = inp.get('valley', ['K', 'Kp'])
     stacking_type = int(inp.get('stacking_type', 2))
+    hbn_swap = int(inp.get('hbn_swap', 0))
 
     a = A_GRAPHENE * 1e10
     a_hBN = A_HBN * 1e10
@@ -295,10 +309,11 @@ def do_calc(filepath):
             continue
 
         print(f"  Building {v} valley...")
+        psi = _get_psi_zerofield(hbn_swap)
         if v == 'K':
-            T0, T1, T2, T3 = _build_coupling_matrices_K(V0, V1)
+            T0, T1, T2, T3 = _build_coupling_matrices_K(V0, V1, psi)
         else:
-            T0, T1, T2, T3 = _build_coupling_matrices_Kp(V0, V1)
+            T0, T1, T2, T3 = _build_coupling_matrices_Kp(V0, V1, psi)
 
         H_hopp = _build_moire_hopping(Q_idx, NG, T0, T1, T2, T3, v)
 

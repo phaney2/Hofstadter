@@ -65,6 +65,7 @@ def build_hofstadter_setup(inp):
     num_bands = 2 * (int(np.max(np.abs(bands_sel))) + 1)
     nremotebands = int(inp.get('nremotebands', 300))
     stacking_type = int(inp.get('stacking_type', 2))
+    hbn_swap = int(inp.get('hbn_swap', 0))
 
     # --- Derived quantities (SI) ---
     eps = A_HBN / A_GRAPHENE - 1
@@ -113,7 +114,7 @@ def build_hofstadter_setup(inp):
     # --- K valley ---
     print("  Building K-valley Hamiltonian...")
     term1_K, term2_K, term3_K, qNslabels_K = get_interbilayerterms_K(
-        N, Nq, ktheta, lB, v0_J, v1_J, eta_bc, qq, pp, theta)
+        N, Nq, ktheta, lB, v0_J, v1_J, eta_bc, qq, pp, theta, hbn_swap)
     Hintra_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'A')
     Ax_K, Ay_K = get_berry_connection_K(N, B, qNslabels_K)
 
@@ -145,7 +146,7 @@ def build_hofstadter_setup(inp):
     # --- K' valley ---
     print("  Building K'-valley Hamiltonian...")
     term1_Kp, term2_Kp, term3_Kp, qNslabels_Kp = get_interbilayerterms_Kp(
-        N, Nq, ktheta, lB, v0_J, v1_J, eta_bc, qq, pp, theta)
+        N, Nq, ktheta, lB, v0_J, v1_J, eta_bc, qq, pp, theta, hbn_swap)
     Hintra_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'A')
     Ax_Kp, Ay_Kp = get_berry_connection_Kp(N, B, qNslabels_Kp)
 

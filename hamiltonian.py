@@ -108,14 +108,31 @@ def _compute_RR(theta):
     return RR
 
 
-def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta=0.0):
+def _get_psi(hbn_swap):
+    """Return the moire coupling phase psi (code convention: +0.29 default).
+
+    When hbn_swap=1, recompute psi from Moon & Koshino Eq. 18 with V_N and
+    V_B interchanged.  This flips the effective mass term M^eff, swapping
+    which side of the gap hosts the n=0,1 Landau levels.
+    """
+    if hbn_swap:
+        V_N, V_B = -1.40, 3.34   # eV, Moon & Koshino PRB 87, 205404 (2013)
+        omega = np.exp(-2j * np.pi / 3)
+        z_swap = -(1 / V_B + omega / V_N)
+        return -np.angle(z_swap)
+    return 0.29
+
+
+def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp,
+                            theta=0.0, hbn_swap=0):
     """Compute inter-bilayer coupling terms for K valley."""
     q1 = ktheta * np.array([0, -1])
     q2 = ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
     q3 = ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
 
+    psi = _get_psi(hbn_swap)
     w = np.exp(-1j * 2 * np.pi / 3)
-    phase = v1 * np.exp(1j * 0.29)
+    phase = v1 * np.exp(1j * psi)
     t1 = phase * np.array([[1, w], [w, w**(-1)]])
     t2 = phase * np.array([[1, 1], [w**(-1), w**(-1)]])
     t3 = phase * np.array([[1, w**(-1)], [1, w**(-1)]])
@@ -135,14 +152,16 @@ def get_interbilayerterms_K(N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta=0.0):
         fnm_tables, LLlabels, (t1, t2, t3), 'B')
 
 
-def get_interbilayerterms_Kp(N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta=0.0):
+def get_interbilayerterms_Kp(N, Nq, ktheta, lB, v0, v1, eta, qq, pp,
+                             theta=0.0, hbn_swap=0):
     """Compute inter-bilayer coupling terms for K' valley."""
     q1 = -ktheta * np.array([0, -1])
     q2 = -ktheta * np.array([np.sqrt(3) / 2, 1 / 2])
     q3 = -ktheta * np.array([-np.sqrt(3) / 2, 1 / 2])
 
+    psi = _get_psi(hbn_swap)
     w = np.exp(-1j * 2 * np.pi / 3)
-    phase = v1 * np.exp(1j * 0.29)
+    phase = v1 * np.exp(1j * psi)
     t1 = np.conj(phase * np.array([[1, w], [w, w**(-1)]]))
     t2 = np.conj(phase * np.array([[1, 1], [w**(-1), w**(-1)]]))
     t3 = np.conj(phase * np.array([[1, w**(-1)], [1, w**(-1)]]))
