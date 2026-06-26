@@ -95,15 +95,6 @@ than re-parsing the source.
   the off-diagonal blocks.  See Moon & Koshino, PRB 90, 155406 (2014),
   Eqs. 25 and B1.  This applies to `main_v3.py`, `zerofield.py`, and the
   semiclassical code (`bandstructure.py`, `hofstadter_system.py`).
-- **hBN alignment swap**: The `hbn_swap` parameter (default 0) models
-  60°-rotated hBN (B↔N interchange).  When `hbn_swap=1`, the moire
-  coupling phase psi is recomputed from Moon & Koshino PRB 87, 205404
-  (2013) Eq. 18 with V_N and V_B interchanged (psi: 0.29 → 2.386 rad).
-  V0 and |V1| are unchanged.  This flips the effective sublattice mass
-  M^eff, moving the n=0,1 Landau levels to the opposite side of the gap.
-  Applies to `hamiltonian.py` (Hofstadter), `zerofield.py`, and the
-  semiclassical code (`bandstructure.py`, `susceptibility.py`,
-  `hofstadter_system.py`).
 - The basis label system (composite strings with `_` separators, searched
   via substring intersection) is load-bearing. Any change to label
   formatting will silently break `getindices` lookups.

@@ -82,7 +82,7 @@ variables (e.g., `elist` can use `nebin`).
 | `isparallel` | int | `1` | 0 = serial, 1 = parallel k-loop |
 | `layer_resolved` | int | `0` | 1 = compute per-eigenstate layer weights (bilayer only; uses `eigh` instead of `eigvalsh`) |
 | `stacking_type` | int | `2` | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). See Moon & Koshino, PRB 90, 155406 (2014), Eqs. 25 and B1. Ignored for monolayer. |
-| `hbn_swap` | int | `0` | hBN alignment: 0 = default (psi=+0.29), 1 = B/N swapped (60°-rotated hBN). Recomputes the moire coupling phase psi from Moon & Koshino Eq. 18 with V_N and V_B interchanged, flipping the effective mass term and moving the n=0,1 Landau levels to the opposite side of the gap. |
+| `moire_psi` | float (rad) | `0.29` | Moire coupling phase psi. |
 
 #### Output control
 
@@ -123,7 +123,7 @@ variables (e.g., `elist` can use `nebin`).
 | `dk` | float (1/A) | `5e-4` | k-point spacing along the path |
 | `valley` | cell | `{'K', 'Kp'}` | Which valleys to compute |
 | `stacking_type` | int | `2` | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). Ignored for monolayer. |
-| `hbn_swap` | int | `0` | hBN alignment: 0 = default, 1 = B/N swapped (60°-rotated hBN). See Hofstadter parameter table for details. |
+| `moire_psi` | float (rad) | `0.29` | Moire coupling phase psi. |
 | `outputfile` | string | `bands_zerofield.npz` | Output filename |
 
 ---

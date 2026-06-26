@@ -291,7 +291,7 @@ def do_calc(filepath):
     if layer_resolved and nlayers == 1:
         layer_resolved = 0
     stacking_type = int(d.get('stacking_type', 2))
-    hbn_swap = int(d.get('hbn_swap', 0))
+    psi = float(d.get('moire_psi', 0.29))
 
     if calctype == 'spectrum':
         calctype = 'dos'
@@ -339,7 +339,7 @@ def do_calc(filepath):
     if 'K' in valley:
         print("  Building K-valley Hamiltonian...")
         term1_K, term2_K, term3_K, qNslabels_K = get_interbilayerterms_K(
-            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta, hbn_swap)
+            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta, psi)
         Hintra_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'A')
 
         dl = Hintra_K.shape[0]
@@ -368,7 +368,7 @@ def do_calc(filepath):
     if 'Kp' in valley:
         print("  Building K'-valley Hamiltonian...")
         term1_Kp, term2_Kp, term3_Kp, qNslabels_Kp = get_interbilayerterms_Kp(
-            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta, hbn_swap)
+            N, Nq, ktheta, lB, v0, v1, eta, qq, pp, theta, psi)
         Hintra_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'A')
 
         dl = Hintra_Kp.shape[0]

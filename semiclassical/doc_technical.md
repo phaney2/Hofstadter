@@ -116,9 +116,7 @@ Bilayer adds off-diagonal v3 terms (Vx_TB, Vy_TB blocks).
 ## T-matrix conventions
 
 K valley uses `exp(-i*psi)`, K' uses `exp(+i*psi)`.
-Default `psi = 0.29` rad.  When `hbn_swap = 1`, psi is recomputed from
-Moon & Koshino Eq. 18 with V_N ↔ V_B (psi ≈ 2.386 rad), flipping the
-effective sublattice mass.
+Default `psi = 0.29` rad (configurable via `moire_psi` input parameter).
 K' Kronecker deltas use `-q_i` (sign flip on all three moire vectors).
 
 ```

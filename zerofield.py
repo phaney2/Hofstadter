@@ -18,19 +18,6 @@ from parser import parse_input_file
 PSI_DEFAULT = -0.29
 
 
-def _get_psi_zerofield(hbn_swap):
-    """Return the moire coupling phase in zero-field convention (default -0.29).
-
-    When hbn_swap=1, recompute from Moon & Koshino Eq. 18 with V_N <-> V_B.
-    """
-    if hbn_swap:
-        V_N, V_B = -1.40, 3.34
-        omega = np.exp(-2j * np.pi / 3)
-        z_swap = -(1 / V_B + omega / V_N)
-        return np.angle(z_swap)
-    return PSI_DEFAULT
-
-
 def _compute_moire_vectors(theta, a, a_hBN):
     R = np.array([[np.cos(theta), -np.sin(theta), 0],
                   [np.sin(theta),  np.cos(theta), 0],
@@ -270,7 +257,7 @@ def do_calc(filepath):
     dk = inp.get('dk', 5e-4)
     valley = inp.get('valley', ['K', 'Kp'])
     stacking_type = int(inp.get('stacking_type', 2))
-    hbn_swap = int(inp.get('hbn_swap', 0))
+    psi = -float(inp.get('moire_psi', 0.29))
 
     a = A_GRAPHENE * 1e10
     a_hBN = A_HBN * 1e10
@@ -309,7 +296,6 @@ def do_calc(filepath):
             continue
 
         print(f"  Building {v} valley...")
-        psi = _get_psi_zerofield(hbn_swap)
         if v == 'K':
             T0, T1, T2, T3 = _build_coupling_matrices_K(V0, V1, psi)
         else:
