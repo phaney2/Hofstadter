@@ -615,6 +615,76 @@ already well-behaved).
 sigma_xy reduces to the TKNN/Chern number formula.  Quantized plateaus
 of sigma_xy in spectral gaps are a good numerical check.
 
+### Self-consistent Born approximation (SCBA)
+
+With `broadening = 'scba'`, the constant broadening Gamma is replaced by
+an energy-dependent Gamma(E) determined self-consistently from the
+disorder-broadened density of states.
+
+**Physical motivation:** Constant broadening treats all states as equally
+extended.  In reality, states in narrow Hofstadter subbands (bandwidth
+W << Gamma_disorder) are Anderson-localized and carry far less
+dissipative current.  The SCBA captures this at mean-field level:
+Gamma(E) is proportional to the local DOS, which is small in gaps and
+self-consistently shrinks in narrow bands.
+
+**Self-consistency equation** (Ando 1974, MacDonald 1984):
+
+For short-range (white-noise) disorder with strength Gamma_0:
+
+```
+Gamma(E) = pi * Gamma_0^2 * rho(E)
+rho(E) = (1 / (Nk * 2*pp)) * sum_{n,k} (1/pi) * Gamma(E) / [(E - E_nk)^2 + Gamma(E)^2]
+```
+
+where rho(E) is the physical DOS per primary moire unit cell.  The
+factor 2*pp accounts for the magnetic BZ being 1/(2*pp) of the
+moire BZ (pp for zone folding, 2 for the doubled real-space cell).
+The sum runs over all k-points and bands in the eigenvalue pass.
+Gamma depends on the probe energy E (same for all eigenstates at a given
+energy), not on the eigenstate energy E_nk.
+
+**Iteration algorithm:**
+
+1. Initialize Gamma(E) = Gamma_0 on a fine energy grid.
+2. Compute rho(E) from the current Gamma(E).
+3. Update: Gamma_new(E) = pi * Gamma_0^2 * rho(E).
+4. Floor: enforce Gamma(E) >= scba_floor * Gamma_0.
+5. Mix using Anderson/Pulay acceleration (depth = scba_anderson,
+   default 5): store the last M iterates and residuals, solve a small
+   M×M least-squares problem for the optimal linear combination.
+   Falls back to linear mixing (alpha = scba_mixing) on the first
+   iteration and when the least-squares system is singular.
+6. Repeat until max|Gamma_new - Gamma_old| / max(Gamma) < scba_tol.
+
+Anderson mixing typically converges in ~25-30 iterations vs ~200 for
+pure linear mixing.  Set scba_anderson = 0 to disable and use pure
+linear mixing.  The floor prevents Gamma from vanishing in spectral
+gaps, which would cause numerical issues.
+
+**Two-pass k-loop:** The SCBA needs all eigenvalues before computing
+Gamma(E), so a lightweight eigenvalue-only pass (using `eigvalsh`, no
+eigenvectors) runs first.  The full transport pass (with `eigh`,
+velocity matrix elements, and Kubo sums) runs second with the
+self-consistent Gamma(E).
+
+**Effect on Kubo formulas:**
+
+- sigma_xx and L12_xx: The spectral function A_n(eps) uses Gamma(eps)
+  instead of constant Gamma.  Since Gamma depends on the probe energy
+  eps (not on eigenstate indices n, m), it factors out of the n,m sum
+  at each eps grid point.  The matrix structure `(L @ vx_sq) * L` is
+  preserved; Gamma(eps)^2 multiplies each eps contribution.
+
+- sigma_xy and L12_xy: Keep the constant Gamma_0.  The Hall conductivity
+  is topological (quantized Chern numbers in gaps), and Gamma only
+  regularizes the interband energy denominator D_nm^2 + G^2.  Using
+  energy-dependent Gamma here would break quantization without physical
+  benefit.  This follows MacDonald, PRB 29, 6563 (1984).
+
+**Output:** The self-consistent Gamma(E) is stored in the output file
+as `Gamma_E_grid` and `Gamma_E` (both in meV), along with `scba_niter`.
+
 ---
 ---
 
