@@ -108,12 +108,21 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
 
     Returns (sxx, sxy, l12xx, l12xy) each shape (n_mu,).
     Prefactors (pp, area, 1/Nk) are applied in the caller.
+
+    In SCBA mode (d['scba_Gamma_E'] is not None), sxx and l12xx include
+    the Gamma(eps)^2 factor from the normalized spectral functions, so
+    the caller's pf_xx must NOT contain G^2.  In constant mode, sxx is
+    G^2-free as before.
     """
     E = E_meV / 1000.0
     all_mu = d['all_mu_eV']
     G = d['Gamma_eV']
     G2 = G * G
     kT = d['kT_eV']
+
+    scba_grid = d.get('scba_E_grid')
+    scba_Gamma = d.get('scba_Gamma_E')
+    use_scba = scba_Gamma is not None
 
     vx_sq = np.abs(vx) ** 2
     Omega = np.imag(vx * np.conj(vy))
@@ -134,12 +143,20 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
         margin = 10.0 * kT
         eps_lo = all_mu.min() - margin
         eps_hi = all_mu.max() + margin
-        d_eps = min(G, kT) / 5.0
+        G_for_grid = G if not use_scba else np.min(scba_Gamma)
+        d_eps = min(G_for_grid, kT) / 5.0
         n_eps = max(int(np.ceil((eps_hi - eps_lo) / d_eps)) + 1, 50)
         eps_grid = np.linspace(eps_lo, eps_hi, n_eps)
 
-        L_all = 1.0 / ((eps_grid[:, None] - E[None, :]) ** 2 + G2)
-        Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1)
+        if use_scba:
+            G_eps = np.interp(eps_grid, scba_grid, scba_Gamma)
+            G2_eps = G_eps ** 2
+            L_all = 1.0 / ((eps_grid[:, None] - E[None, :]) ** 2
+                           + G2_eps[:, None])
+            Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1) * G2_eps
+        else:
+            L_all = 1.0 / ((eps_grid[:, None] - E[None, :]) ** 2 + G2)
+            Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1)
 
         sort_idx = np.argsort(E)
         E_sorted = E[sort_idx]
@@ -160,11 +177,140 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
             l12xy[i_mu] = np.trapezoid((eps_grid - mu) * neg_dfde * Phi_xy,
                                    eps_grid)
         else:
-            L = 1.0 / ((E - mu) ** 2 + G2)
-            sxx[i_mu] = L @ vx_sq @ L
+            if use_scba:
+                G_mu = float(np.interp(mu, scba_grid, scba_Gamma))
+                G2_mu = G_mu * G_mu
+                L = 1.0 / ((E - mu) ** 2 + G2_mu)
+                sxx[i_mu] = G2_mu * (L @ vx_sq @ L)
+            else:
+                L = 1.0 / ((E - mu) ** 2 + G2)
+                sxx[i_mu] = L @ vx_sq @ L
             sxy[i_mu] = np.sum(K_n[E < mu])
 
     return sxx, sxy, l12xx, l12xy
+
+
+def _solve_scba(all_eigs_eV, Gamma0, pp, Nk, mixing=0.3, tol=1e-4,
+                maxiter=200, floor_ratio=0.01, anderson_depth=5):
+    """Compute self-consistent energy-dependent broadening Gamma(E).
+
+    Iterates the SCBA equation Gamma(E) = pi * Gamma0^2 * rho(E) where
+    rho(E) is the physical DOS per primary moire unit cell, computed with
+    the current Gamma(E).
+
+    The k-sum covers the magnetic BZ (1/pp of the moire BZ, halved again
+    by the doubled real-space cell), so the physical DOS normalization is
+    1/(Nk * 2*pp) per eigenvalue sum.
+
+    Uses Anderson/Pulay mixing when anderson_depth > 0 (default 5).
+    Falls back to linear mixing with parameter `mixing` for the first
+    iteration and whenever the Anderson least-squares problem is singular.
+
+    Returns (E_grid, Gamma_E, niter) where E_grid and Gamma_E are in eV.
+    """
+    eigs_flat = all_eigs_eV.ravel()
+    E_min, E_max = eigs_flat.min(), eigs_flat.max()
+    margin = 5.0 * Gamma0 + 0.1 * (E_max - E_min)
+    dE = Gamma0 / 10.0
+    n_grid = max(int(np.ceil((E_max - E_min + 2 * margin) / dE)) + 1, 500)
+    E_grid = np.linspace(E_min - margin, E_max + margin, n_grid)
+
+    Gamma_E = np.full(n_grid, Gamma0)
+    Gamma_min = floor_ratio * Gamma0
+    n_eigs = len(eigs_flat)
+    dos_norm = 1.0 / (np.pi * Nk * 2 * pp)
+    chunk = max(1, 50_000_000 // n_eigs)
+
+    M = max(0, anderson_depth)
+    hist_x = []
+    hist_r = []
+
+    for it in range(maxiter):
+        G2 = Gamma_E ** 2
+        rho = np.zeros(n_grid)
+        for i0 in range(0, n_grid, chunk):
+            i1 = min(i0 + chunk, n_grid)
+            diffs2 = (E_grid[i0:i1, None] - eigs_flat[None, :]) ** 2
+            rho[i0:i1] = np.sum(
+                Gamma_E[i0:i1, None] / (diffs2 + G2[i0:i1, None]), axis=1)
+        rho *= dos_norm
+
+        Gamma_new = np.pi * Gamma0 ** 2 * rho
+        np.maximum(Gamma_new, Gamma_min, out=Gamma_new)
+
+        R = Gamma_new - Gamma_E
+        residual = np.max(np.abs(R)) / np.max(Gamma_E)
+
+        if residual < tol:
+            print(f"  SCBA converged in {it + 1} iterations (residual = {residual:.2e})")
+            return E_grid, Gamma_new, it + 1
+
+        if M > 0 and len(hist_r) > 0:
+            m = len(hist_r)
+            dR = np.column_stack([R - hist_r[j] for j in range(m)])
+            try:
+                coeffs, _, _, _ = np.linalg.lstsq(dR, R, rcond=None)
+                dX = np.column_stack([
+                    (Gamma_new - hist_x[j]) for j in range(m)])
+                Gamma_E = Gamma_new - dX @ coeffs
+                np.maximum(Gamma_E, Gamma_min, out=Gamma_E)
+            except np.linalg.LinAlgError:
+                Gamma_E = mixing * Gamma_new + (1.0 - mixing) * Gamma_E
+        else:
+            Gamma_E = mixing * Gamma_new + (1.0 - mixing) * Gamma_E
+
+        hist_x.append(Gamma_new.copy())
+        hist_r.append(R.copy())
+        if len(hist_x) > M:
+            hist_x.pop(0)
+            hist_r.pop(0)
+
+    print(f"  SCBA did NOT converge after {maxiter} iterations (residual = {residual:.2e})")
+    return E_grid, Gamma_E, maxiter
+
+
+def _solve_kpoint_eigenvalues_core(d, kpt):
+    """Diagonalize H(k) and return eigenvalues only (no eigenvectors).
+
+    Used for the SCBA eigenvalue-collection pass.
+    """
+    kpts = kpt - d['M_mag']
+    kx_val, ky_val = kpts
+    pp, qq = d['pp'], d['qq']
+    Lx, Ly = d['Lx'], d['Ly']
+    gamma = d['gamma']
+    mo = d['moire_offset']
+    band_sel = d['transport_band_sel']
+
+    E_K = E_Kp = None
+
+    if 'K' in d['valley']:
+        tphase1 = np.exp(1j * (pp / qq) * kx_val * Lx)
+        tphase2 = np.exp(-1j * (pp / qq) * kx_val * Lx / 2) * np.exp(1j * ky_val * Ly * (pp / qq))
+        tphase3 = np.exp(-1j * (pp / qq) * kx_val * Lx / 2) * np.exp(-1j * ky_val * Ly * (pp / qq))
+        V_pq = gamma * tphase1 * d['term1_K'] + tphase2 * d['term2_K'] + tphase3 * d['term3_K']
+        Htotal_K = d['H_base_K'].copy()
+        Htotal_K[mo:, mo:] += d['v0_eye'] + V_pq + V_pq.T.conj()
+        ek = np.sort(linalg.eigvalsh(Htotal_K, overwrite_a=True, check_finite=False))
+        E_K = ek[band_sel]
+
+    if 'Kp' in d['valley']:
+        tphase1 = np.exp(-1j * (pp / qq) * kx_val * Lx)
+        tphase2 = np.exp(1j * (pp / qq) * kx_val * Lx / 2) * np.exp(-1j * ky_val * Ly * (pp / qq))
+        tphase3 = np.exp(1j * (pp / qq) * kx_val * Lx / 2) * np.exp(1j * ky_val * Ly * (pp / qq))
+        V_pq = gamma * tphase1 * d['term1_Kp'] + tphase2 * d['term2_Kp'] + tphase3 * d['term3_Kp']
+        Htotal_Kp = d['H_base_Kp'].copy()
+        Htotal_Kp[mo:, mo:] += d['v0_eye'] + V_pq + V_pq.T.conj()
+        ek = np.sort(linalg.eigvalsh(Htotal_Kp, overwrite_a=True, check_finite=False))
+        E_Kp = ek[band_sel]
+
+    return E_K, E_Kp
+
+
+def _solve_kpoint_eigenvalues(args):
+    kc, kpt = args
+    E_K, E_Kp = _solve_kpoint_eigenvalues_core(_worker_shared, kpt)
+    return kc, E_K, E_Kp
 
 
 def _solve_kpoint_transport_core(d, kpt):
@@ -432,6 +578,13 @@ def do_calc(filepath):
         nbands_transport = int(d.get('nbands_transport', 0))
         mu_ref_meV = d.get('mu_ref', None)
         kT_meV = float(d.get('kT', 0.0))
+        broadening_mode = str(d.get('broadening', 'constant')).strip("'\"")
+        scba_mixing = float(d.get('scba_mixing', 0.3))
+        scba_tol = float(d.get('scba_tol', 1e-4))
+        scba_maxiter = int(d.get('scba_maxiter', 200))
+        scba_floor = float(d.get('scba_floor', 0.01))
+        scba_anderson = int(d.get('scba_anderson', 5))
+        use_scba = broadening_mode == 'scba'
 
         mulist_eV = mulist_meV / 1000.0
         Gamma_eV = Gamma_meV / 1000.0
@@ -449,7 +602,8 @@ def do_calc(filepath):
             nb = dim_total
             band_sel = np.arange(dim_total)
 
-        print(f"  Transport: Gamma = {Gamma_meV} meV, kT = {kT_meV} meV, {len(mulist_meV)} mu points, {nb} bands")
+        bmode_str = f"SCBA (Gamma0={Gamma_meV} meV)" if use_scba else f"Gamma = {Gamma_meV} meV"
+        print(f"  Transport: {bmode_str}, kT = {kT_meV} meV, {len(mulist_meV)} mu points, {nb} bands")
 
         # --- Build velocity operators: v = (i/hbar)[A, H_base] ---
         # Work in eV / Angstrom / eV*s  →  velocity in Ang/s
@@ -489,6 +643,72 @@ def do_calc(filepath):
         all_mu = np.array(all_mu)
         n_all = len(all_mu)
 
+        # --- SCBA: eigenvalue pass + self-consistent broadening solve ---
+        scba_E_grid = None
+        scba_Gamma_E = None
+        scba_niter = 0
+        if use_scba:
+            eig_shared = {
+                'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
+                'gamma': gamma,
+                'moire_offset': moire_offset,
+                'valley': valley, 'M_mag': M_mag,
+                'v0_eye': v0_eye_scaled,
+                'transport_band_sel': band_sel,
+            }
+            if 'K' in valley:
+                eig_shared.update({
+                    'H_base_K': scale * H_base_K,
+                    'term1_K': scale * term1_K,
+                    'term2_K': scale * term2_K,
+                    'term3_K': scale * term3_K,
+                })
+            if 'Kp' in valley:
+                eig_shared.update({
+                    'H_base_Kp': scale * H_base_Kp,
+                    'term1_Kp': scale * term1_Kp,
+                    'term2_Kp': scale * term2_Kp,
+                    'term3_Kp': scale * term3_Kp,
+                })
+
+            print(" SCBA pass 1: collecting eigenvalues")
+            all_eigs_K = np.zeros((Nk_tot, nb)) if 'K' in valley else None
+            all_eigs_Kp = np.zeros((Nk_tot, nb)) if 'Kp' in valley else None
+
+            if isparallel:
+                default_nw = int(os.environ.get('SLURM_CPUS_PER_TASK',
+                                                cpu_count()))
+                nworkers = min(int(d.get('nworkers', default_nw)), Nk_tot)
+                tasks = [(kc, kpoints[kc, :]) for kc in range(Nk_tot)]
+                with Pool(processes=nworkers,
+                          initializer=_init_kpoint_worker,
+                          initargs=(eig_shared,)) as pool:
+                    for kc, eK, eKp in pool.imap_unordered(
+                            _solve_kpoint_eigenvalues, tasks):
+                        if eK is not None:
+                            all_eigs_K[kc, :] = eK
+                        if eKp is not None:
+                            all_eigs_Kp[kc, :] = eKp
+            else:
+                for kc in range(Nk_tot):
+                    eK, eKp = _solve_kpoint_eigenvalues_core(
+                        eig_shared, kpoints[kc, :])
+                    if eK is not None:
+                        all_eigs_K[kc, :] = eK
+                    if eKp is not None:
+                        all_eigs_Kp[kc, :] = eKp
+
+            eig_arrays = [a for a in [all_eigs_K, all_eigs_Kp]
+                          if a is not None]
+            all_eigs_eV = np.concatenate(eig_arrays, axis=0) / 1000.0
+            print(f"  Collected {all_eigs_eV.shape[0]} x {all_eigs_eV.shape[1]} eigenvalues")
+
+            scba_E_grid, scba_Gamma_E, scba_niter = _solve_scba(
+                all_eigs_eV, Gamma_eV, pp, Nk_tot,
+                mixing=scba_mixing, tol=scba_tol,
+                maxiter=scba_maxiter, floor_ratio=scba_floor,
+                anderson_depth=scba_anderson)
+
         # --- Pack shared data (meV Hamiltonian, Ang/s velocity, Kubo params) ---
         shared = {
             'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
@@ -500,6 +720,8 @@ def do_calc(filepath):
             'all_mu_eV': all_mu,
             'Gamma_eV': Gamma_eV,
             'kT_eV': kT_eV,
+            'scba_E_grid': scba_E_grid,
+            'scba_Gamma_E': scba_Gamma_E,
         }
         if 'K' in valley:
             shared.update({
@@ -533,7 +755,8 @@ def do_calc(filepath):
         dos_K = np.zeros(n_mu) if 'K' in valley else None
         dos_Kp = np.zeros(n_mu) if 'Kp' in valley else None
 
-        print(" Entering the k loop (transport)")
+        pass_label = "transport, pass 2" if use_scba else "transport"
+        print(f" Entering the k loop ({pass_label})")
         next_pct = 5
         done_count = 0
 
@@ -584,12 +807,21 @@ def do_calc(filepath):
         print(" Done with the k loop")
 
         # --- Apply prefactors and mu_ref subtraction ---
-        G2 = Gamma_eV * Gamma_eV
         pf_xy = -4.0 * np.pi * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk_tot)
-        pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2 / (A_m_Ang2 * Nk_tot)
+        if use_scba:
+            pf_xx = 4.0 * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk_tot)
+        else:
+            G2 = Gamma_eV * Gamma_eV
+            pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2 / (A_m_Ang2 * Nk_tot)
 
         result = {'calctype': 'transport', 'params': inp,
-                  'mulist': mulist_meV}
+                  'mulist': mulist_meV, 'broadening': broadening_mode}
+        if use_scba:
+            result.update({
+                'Gamma_E_grid': scba_E_grid * 1000.0,
+                'Gamma_E': scba_Gamma_E * 1000.0,
+                'scba_niter': scba_niter,
+            })
 
         if compute_ref:
             print(f"  Reference mu = {mu_ref_meV} meV (sigma_xy = 0 here)")

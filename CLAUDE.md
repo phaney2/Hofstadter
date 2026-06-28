@@ -9,6 +9,9 @@ on hBN.  Four calculation modes:
    (Nq=qq).  Supports `calctype = 'ek'` (band structure), `'dos'`
    (density of states), and `'transport'` (Kubo-formula linear response
    transport coefficients: sigma_xx, sigma_xy, L12_xx, L12_xy vs mu).
+   Supports constant broadening or SCBA (self-consistent Born
+   approximation) for energy-dependent broadening that captures
+   localization-induced σ_xx suppression in narrow subbands.
    Legacy driver `main_v2.py` is kept for reference.
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
    expansion along a k-path through the moire BZ.
