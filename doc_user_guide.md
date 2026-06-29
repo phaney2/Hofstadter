@@ -104,6 +104,7 @@ variables (e.g., `elist` can use `nebin`).
 | `scba_maxiter` | int | `200` | Maximum SCBA iterations. |
 | `scba_floor` | float | `0.01` | Minimum Γ(E)/Γ₀ ratio; prevents Γ from vanishing in spectral gaps. |
 | `scba_anderson` | int | `5` | Anderson/Pulay mixing depth (number of prior iterations retained). Set to 0 for pure linear mixing. |
+| `scba_xy_constant` | int | `0` | If 1, use constant Γ₀ (instead of Γ(E_n)) in the σ_xy Berry curvature kernel. Default 0 = use SCBA broadening for σ_xy. |
 
 ### Zero-field parameter reference
 

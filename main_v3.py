@@ -123,11 +123,17 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     scba_grid = d.get('scba_E_grid')
     scba_Gamma = d.get('scba_Gamma_E')
     use_scba = scba_Gamma is not None
+    scba_xy_constant = d.get('scba_xy_constant', 0)
 
     vx_sq = np.abs(vx) ** 2
     Omega = np.imag(vx * np.conj(vy))
-    D2G2 = (E[:, None] - E[None, :]) ** 2 + G2
-    inv_D2G2 = 1.0 / D2G2
+    D2 = (E[:, None] - E[None, :]) ** 2
+    if use_scba and not scba_xy_constant:
+        G_n = np.interp(E, scba_grid, scba_Gamma)
+        G2_n = G_n ** 2
+        inv_D2G2 = 1.0 / (D2 + G2_n[:, None])
+    else:
+        inv_D2G2 = 1.0 / (D2 + G2)
 
     n_mu = len(all_mu)
     sxx = np.zeros(n_mu)
@@ -591,6 +597,7 @@ def do_calc(filepath):
         scba_maxiter = int(d.get('scba_maxiter', 200))
         scba_floor = float(d.get('scba_floor', 0.01))
         scba_anderson = int(d.get('scba_anderson', 5))
+        scba_xy_constant = int(d.get('scba_xy_constant', 0))
         use_scba = broadening_mode == 'scba'
 
         mulist_eV = mulist_meV / 1000.0
@@ -770,6 +777,7 @@ def do_calc(filepath):
             'kT_eV': kT_eV,
             'scba_E_grid': scba_E_grid,
             'scba_Gamma_E': scba_Gamma_E,
+            'scba_xy_constant': scba_xy_constant,
         }
         if 'K' in valley:
             shared.update({

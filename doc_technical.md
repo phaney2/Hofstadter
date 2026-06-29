@@ -551,7 +551,7 @@ contribution.  Manifestly non-negative and vanishes in spectral gaps.
 
 ```
 Phi_xy(eps) = sum_{k, E_n < eps} K_n
-K_n = sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
+K_n = sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G_n^2)
 ```
 
 Cumulative sum of per-eigenstate Berry curvature kernels.  In the
@@ -678,11 +678,13 @@ self-consistent Gamma(E).
   at each eps grid point.  The matrix structure `(L @ vx_sq) * L` is
   preserved; Gamma(eps)^2 multiplies each eps contribution.
 
-- sigma_xy and L12_xy: Keep the constant Gamma_0.  The Hall conductivity
-  is topological (quantized Chern numbers in gaps), and Gamma only
-  regularizes the interband energy denominator D_nm^2 + G^2.  Using
-  energy-dependent Gamma here would break quantization without physical
-  benefit.  This follows MacDonald, PRB 29, 6563 (1984).
+- sigma_xy and L12_xy: By default, the Berry curvature kernel
+  `K_n = sum_{m!=n} Im[...] / (D_nm^2 + Gamma(E_n)^2)` uses the
+  SCBA broadening Gamma(E_n) of the occupied state n.  This sharpens
+  sigma_xy features in the low-flux regime where narrow subbands have
+  gaps smaller than Gamma_0.  Chern quantization in gaps is preserved
+  because Gamma(E) vanishes in gaps (down to the floor).  Set
+  `scba_xy_constant = 1` to revert to constant Gamma_0 in the kernel.
 
 **Output:** The self-consistent Gamma(E) is stored in the output file
 as `Gamma_E_grid` and `Gamma_E` (both in meV), along with `scba_niter`.

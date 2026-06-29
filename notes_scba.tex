@@ -1,0 +1,398 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{hyperref}
+
+\newcommand{\Gam}{\Gamma}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\BZ}{\mathrm{BZ}}
+\newcommand{\MBZ}{\mathrm{MBZ}}
+\newcommand{\Nk}{N_k}
+\newcommand{\Ang}{\text{\AA}}
+
+\title{Self-Consistent Born Approximation (SCBA) \\
+for Hofstadter Transport Coefficients}
+\author{Notes for internal reference}
+\date{}
+
+\begin{document}
+\maketitle
+
+%======================================================================
+\section{Formalism}
+%======================================================================
+
+\subsection{Kubo formula for longitudinal conductivity}
+
+The dissipative (longitudinal) conductivity at chemical potential $\mu$
+and temperature $T$ is given by the Kubo--Bastin formula in the
+spectral-function representation~\cite{Bastin1971,Streda1982}:
+\begin{equation}\label{eq:sxx_spectral}
+  \sigma_{xx}(\mu) = \frac{\pi e^2 \hbar}{\Omega}
+  \int d\eps\, \Bigl(-\frac{\partial f}{\partial\eps}\Bigr)
+  \Phi_{xx}(\eps),
+\end{equation}
+where $\Omega$ is the system area, $f(\eps)$ is the Fermi--Dirac
+distribution at temperature $T$, and the spectral conductivity is
+\begin{equation}\label{eq:Phi_xx}
+  \Phi_{xx}(\eps) = \sum_{\mathbf{k},n,m}
+  |v^x_{nm}(\mathbf{k})|^2\, A_n(\eps,\mathbf{k})\, A_m(\eps,\mathbf{k}).
+\end{equation}
+Here $v^x_{nm} = \langle n\mathbf{k}|\hat{v}_x|m\mathbf{k}\rangle$
+are velocity matrix elements in the eigenbasis of $H(\mathbf{k})$,
+and the spectral function of eigenstate $n$ is
+\begin{equation}\label{eq:spectral_fn}
+  A_n(\eps) = \frac{1}{\pi}\,
+  \frac{\Gam(\eps)}{(\eps - E_n)^2 + \Gam(\eps)^2}.
+\end{equation}
+For constant broadening, $\Gam(\eps) = \Gam_0$ is
+energy-independent.  Substituting Eq.~\eqref{eq:spectral_fn} into
+\eqref{eq:Phi_xx} and pulling out the $\Gam^2/\pi^2$ prefactor:
+\begin{equation}\label{eq:Phi_xx_L}
+  \Phi_{xx}(\eps) = \frac{\Gam(\eps)^2}{\pi^2}
+  \sum_{\mathbf{k},n,m} |v^x_{nm}|^2\, L_n(\eps)\, L_m(\eps),
+\end{equation}
+where $L_n(\eps) \equiv [(\eps - E_n)^2 + \Gam(\eps)^2]^{-1}$ is the
+(unnormalized) Lorentzian.  At $T=0$,
+$-\partial f/\partial\eps = \delta(\eps - \mu)$ and
+\begin{equation}
+  \sigma_{xx}(\mu)\Big|_{T=0}
+  = \frac{e^2 \hbar}{\pi\,\Omega}\, \Gam(\mu)^2
+  \sum_{\mathbf{k},n,m} |v^x_{nm}|^2\, L_n(\mu)\, L_m(\mu).
+\end{equation}
+
+\subsection{Hall conductivity}
+
+The Hall conductivity is~\cite{TKNN1982,Streda1982}:
+\begin{equation}\label{eq:sxy}
+  \sigma_{xy}(\mu) = \frac{e^2}{\hbar}\,\frac{1}{2\pi}\,
+  \frac{1}{\Omega}\sum_{\mathbf{k}} \sum_{E_n < \mu} \mathcal{K}_n(\mathbf{k}),
+\end{equation}
+where the broadened Berry curvature kernel is
+\begin{equation}
+  \mathcal{K}_n(\mathbf{k}) = \sum_{m \neq n}
+  \frac{\mathrm{Im}[v^x_{nm}\, (v^y_{nm})^*]}
+  {(E_n - E_m)^2 + \Gam(E_n)^2}.
+\end{equation}
+By default, $\Gam(E_n)$ is the SCBA broadening of the occupied
+state~$n$.  This sharpens $\sigma_{xy}$ features at low flux where
+subbands are narrower than~$\Gam_0$.  Chern quantization in spectral
+gaps is preserved: $\Gam(E) \to \Gam_0 f_{\min}$ in gaps, and the
+Chern number is insensitive to the magnitude of the regularizer.
+Setting \texttt{scba\_xy\_constant = 1} reverts to constant~$\Gam_0$.
+In the limit $\Gam \to 0$, $\sigma_{xy}$ reduces to the TKNN formula,
+and its value in a spectral gap gives the Chern number~$C$.
+
+\subsection{The SCBA self-consistency equation}
+
+For short-range (white-noise) disorder with scattering strength
+$\Gam_0$ (the bare broadening), the self-consistent Born
+approximation~\cite{Ando1974} replaces the constant
+$\Gam_0$ with an energy-dependent $\Gam(E)$ determined by:
+\begin{equation}\label{eq:scba}
+  \boxed{
+  \Gam(E) = \pi\, \Gam_0^2\, \rho(E)
+  }
+\end{equation}
+where the density of states per unit cell is computed with the
+current $\Gam(E)$:
+\begin{equation}\label{eq:rho}
+  \rho(E) = \frac{1}{N_\BZ}\sum_{\mathbf{k},n}
+  \frac{1}{\pi}\,\frac{\Gam(E)}{(E - E_{n\mathbf{k}})^2 + \Gam(E)^2}.
+\end{equation}
+Here $N_\BZ$ is the total number of unit cells in the BZ sum (so that
+$\rho$ is a DOS \emph{per unit cell}), and the sum runs over all
+bands~$n$ and $\mathbf{k}$-points.
+
+\textbf{Physical content.}  Equation~\eqref{eq:scba} makes $\Gam(E)$
+proportional to the local DOS.  In spectral gaps, $\rho \to 0$ so
+$\Gam \to 0$: states are not broadened into the gap.  In narrow
+Hofstadter subbands with bandwidth $W \ll \Gam_0$, the self-consistent
+$\Gam(E)$ shrinks below $\Gam_0$, reflecting Anderson localization at
+mean-field level.  The dissipative conductivity
+$\sigma_{xx} \propto \Gam^2\, \rho^2$ is then strongly suppressed in
+narrow bands.
+
+\textbf{SCBA broadening in $\sigma_{xy}$.}  By default the code uses
+$\Gam(E_n)$ in the Berry curvature kernel.  Since $\Gam(E)$ is small
+(floored at $f_{\min}\,\Gam_0$) in spectral gaps, the Chern
+quantization $\sigma_{xy} = (e^2/h)\,C$ is preserved---indeed
+sharpened relative to constant $\Gam_0$.  At low flux, where Hofstadter
+subbands are narrower than $\Gam_0$, this produces $\sigma_{xy}$
+features that are consistent with the SCBA-sharpened $\sigma_{xx}$.
+
+\subsection{Iterative solution}
+
+Equations \eqref{eq:scba}--\eqref{eq:rho} are solved iteratively:
+\begin{enumerate}
+  \item Initialize $\Gam^{(0)}(E) = \Gam_0$ on a fine energy grid.
+  \item Compute $\rho^{(i)}(E)$ from the current $\Gam^{(i)}(E)$
+    via Eq.~\eqref{eq:rho}.
+  \item Compute the ``target'' $\widetilde{\Gam}^{(i)}(E)
+    = \pi\,\Gam_0^2\, \rho^{(i)}(E)$.
+  \item Enforce a floor:
+    $\widetilde{\Gam}^{(i)}(E) \ge f_{\min}\,\Gam_0$ to prevent
+    numerical instability in spectral gaps.
+  \item Update $\Gam^{(i+1)}$ via Anderson (Pulay) mixing of
+    depth~$M$, or linear mixing as a fallback.
+  \item Converge when
+    $\max|\widetilde{\Gam} - \Gam^{(i)}| / \max(\Gam^{(i)}) < \tau$.
+\end{enumerate}
+
+\paragraph{Anderson mixing.}
+Given the last $M$ iterates $\{x_j\}$ and residuals
+$\{R_j = g(x_j) - x_j\}$, form the matrix
+$\Delta R = [R_{i} - R_j]$ and solve
+$\Delta R\, \mathbf{c} = R_{\mathrm{current}}$ in the least-squares
+sense.  The new iterate is
+$x_{\mathrm{new}} = \widetilde{x} - \Delta X\,\mathbf{c}$, where
+$\Delta X = [\widetilde{x} - x_j]$.  This is equivalent to a
+multi-secant (quasi-Newton) update and typically converges in
+$\sim$25--30 iterations versus $\sim$200 for linear mixing.
+
+%======================================================================
+\section{Implementation in the Hofstadter code}
+%======================================================================
+
+This section describes how the formalism of Section~1 maps onto the
+code in \texttt{main\_v3.py}.
+
+\subsection{Brillouin zone geometry and normalization}
+
+The moire superlattice has a ``primary'' unit cell area
+\begin{equation}
+  A_{\mathrm{prim}} = \frac{\sqrt{3}}{2}\, L_{\mathrm{moire}}^2,
+\end{equation}
+and the code uses a \emph{doubled} real-space unit cell:
+\begin{equation}
+  A_{\mathrm{uc}} = 2\, A_{\mathrm{prim}} = \sqrt{3}\, L_{\mathrm{moire}}^2.
+\end{equation}
+The magnetic flux per doubled unit cell is
+$\Phi/\Phi_0 = qq/pp$, and the magnetic field is
+$B = (qq/pp)\,\Phi_0 / A_{\mathrm{uc}}$.
+
+The magnetic Brillouin zone (MBZ) is $1/pp$ the area of the moire BZ.
+Due to the doubled real-space cell, the moire BZ is itself half the
+``primary'' moire BZ.  Therefore the MBZ covers a fraction $1/(2\,pp)$
+of the primary moire BZ.
+
+Eigenvalues are computed on a uniform $\mathbf{k}$-mesh of $\Nk$
+points covering the MBZ.  The \emph{physical} DOS per primary unit
+cell requires dividing the eigenvalue sum by the number of primary
+unit cells represented:
+\begin{equation}\label{eq:Nbz}
+  N_\BZ = \Nk \times 2\,pp.
+\end{equation}
+The factor $2\,pp$ accounts for $pp$-fold BZ folding and the factor of
+2 from the doubled cell.
+
+\subsection{SCBA solver: \texttt{\_solve\_scba()}}
+
+\paragraph{Inputs.}  The function receives:
+\begin{itemize}
+  \item \texttt{all\_eigs\_eV}: array of shape
+    $(\Nk \times n_{\mathrm{valleys}},\; n_b)$ containing all
+    eigenvalues from both valleys, in~eV.  Both K and K$'$ eigenvalues
+    are included because white-noise disorder scatters between valleys.
+  \item \texttt{Gamma0}: the bare broadening $\Gam_0$ in eV.
+  \item \texttt{pp}, \texttt{Nk}: for the normalization factor.
+\end{itemize}
+
+\paragraph{Energy grid.}  A uniform grid of spacing
+$\delta E = \Gam_0/10$ is constructed over the eigenvalue range plus a
+margin of $5\Gam_0 + 10\%$ of the bandwidth.
+
+\paragraph{DOS computation.}  At each iteration, the DOS is computed as
+\begin{equation}
+  \rho(E_i) = \frac{1}{\pi\,\Nk\, 2\,pp}
+  \sum_{j} \frac{\Gam(E_i)}{(E_i - E_j)^2 + \Gam(E_i)^2},
+\end{equation}
+where $j$ runs over all eigenvalues in the flattened
+\texttt{all\_eigs\_eV} array.  This is line~221 of \texttt{main\_v3.py}:
+\begin{verbatim}
+  dos_norm = 1.0 / (np.pi * Nk * 2 * pp)
+\end{verbatim}
+The computation is chunked over energy grid points to limit memory
+usage (at most $\sim$50M floats per chunk).
+
+\paragraph{Update and mixing.}  The target broadening
+$\widetilde{\Gam} = \pi\,\Gam_0^2\,\rho$ is computed (line~238),
+floored (line~239), and then mixed via Anderson acceleration of
+depth~$M$ (default 5), falling back to linear mixing with
+$\alpha = 0.3$ on the first iteration or when the least-squares system
+is singular.
+
+\subsection{Two-pass k-loop}
+
+Because the SCBA needs all eigenvalues to solve for $\Gam(E)$, and
+the transport Kubo formulas need $\Gam(E)$ already known, the code
+uses two passes:
+
+\begin{enumerate}
+  \item \textbf{Pass 1 (eigenvalue collection):}
+    \texttt{\_solve\_kpoint\_eigenvalues\_core()} diagonalizes $H(\mathbf{k})$
+    using \texttt{eigvalsh} (eigenvalues only, no eigenvectors).
+    The eigenvalues from all $\mathbf{k}$-points and both valleys are
+    collected into \texttt{all\_eigs\_eV} and passed to
+    \texttt{\_solve\_scba()}.
+
+  \item \textbf{Pass 2 (transport):}
+    \texttt{\_solve\_kpoint\_transport\_core()} diagonalizes
+    $H(\mathbf{k})$ again with \texttt{eigh} (eigenvalues \emph{and}
+    eigenvectors), computes velocity matrix elements, and evaluates the
+    Kubo sums using the now-known $\Gam(E)$.
+\end{enumerate}
+
+\subsection{Effect on $\sigma_{xx}$}
+
+\paragraph{Spectral function.}  In SCBA mode, the spectral function
+uses $\Gam(\eps)$ evaluated at the \emph{probe} energy~$\eps$:
+\begin{equation}
+  A_n(\eps) = \frac{1}{\pi}\,
+  \frac{\Gam(\eps)}{(\eps - E_n)^2 + \Gam(\eps)^2}.
+\end{equation}
+Because $\Gam$ depends on $\eps$ (not on eigenstate indices $n,m$),
+the $\Gam^2/\pi^2$ factor in Eq.~\eqref{eq:Phi_xx_L} can still be
+pulled out of the $n,m$ sum at each grid point:
+\begin{equation}
+  \Phi_{xx}(\eps) = \frac{\Gam(\eps)^2}{\pi^2}
+  \sum_{n,m} |v^x_{nm}|^2\, L_n(\eps)\, L_m(\eps),
+\end{equation}
+with $L_n(\eps) = [(\eps - E_n)^2 + \Gam(\eps)^2]^{-1}$.
+
+\paragraph{Code structure.}  In \texttt{\_transport\_kubo\_single\_k()},
+the SCBA branch (lines~151--156) interpolates $\Gam(\eps)$ from the
+precomputed grid, builds the Lorentzians $L_n(\eps)$ with
+$\Gam(\eps)$, and multiplies the result by $\Gam(\eps)^2$:
+\begin{verbatim}
+  G_eps = np.interp(eps_grid, scba_grid, scba_Gamma)
+  G2_eps = G_eps ** 2
+  L_all = 1.0 / ((eps_grid[:,None] - E[None,:])**2 + G2_eps[:,None])
+  Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1) * G2_eps
+\end{verbatim}
+
+\paragraph{Prefactor.}  The caller applies:
+\begin{equation}
+  \sigma_{xx} = \frac{4\,pp\,\hbar^2}{A_m\,\Nk}
+  \times \sum_\mathbf{k} \Phi_{xx}(\mu) \quad
+  [\text{units of } e^2/h],
+\end{equation}
+where $A_m = pp^2\, A_{\mathrm{uc}} / (2\,qq)$ is the magnetic unit
+cell area in~$\Ang^2$, and the factor of 4 absorbs the spin
+degeneracy times the $\pi$ factors from the spectral functions
+($4 = 2_{\mathrm{spin}} \times 2/\pi \times \pi$; see derivation
+below).  In SCBA mode the $\Gam^2$ is already inside $\Phi_{xx}$, so
+\texttt{pf\_xx} omits it (line~812):
+\begin{verbatim}
+  pf_xx = 4.0 * pp * HBAR_EV**2 / (A_m_Ang2 * Nk_tot)   # SCBA
+  pf_xx = 4.0 * pp * HBAR_EV**2 * G2 / (A_m_Ang2 * Nk_tot)  # constant
+\end{verbatim}
+
+\paragraph{Prefactor derivation.}  Starting from Eq.~\eqref{eq:sxx_spectral}
+at $T=0$ (one spin, one valley, one $\mathbf{k}$-point):
+\begin{align}
+  \sigma_{xx} &= \frac{\pi e^2 \hbar}{\Omega}\, \Phi_{xx}(\mu)
+  = \frac{\pi e^2 \hbar}{\Omega}\, \frac{\Gam^2}{\pi^2}\,
+  \sum_{nm} |v^x_{nm}|^2\, L_n\, L_m \nonumber \\
+  &= \frac{e^2 \hbar}{\pi\,\Omega}\, \Gam^2\,
+  \sum_{nm} |v^x_{nm}|^2\, L_n\, L_m.
+\end{align}
+To express in units of $e^2/h$, divide by $e^2/h = e^2/(2\pi\hbar)$:
+\begin{equation}
+  \frac{\sigma_{xx}}{e^2/h}
+  = \frac{2\hbar^2}{\Omega}\, \Gam^2\, \sum_{nm} |v^x_{nm}|^2\, L_n\, L_m.
+\end{equation}
+Including spin degeneracy ($\times 2$) and the BZ average
+($\Omega \to A_m / pp$, with $1/\Nk$ sum over BZ):
+\begin{equation}
+  \frac{\sigma_{xx}}{e^2/h}
+  = \frac{4\, pp\, \hbar^2}{A_m\,\Nk}\, \Gam^2\,
+  \sum_{\mathbf{k},n,m} |v^x_{nm}|^2\, L_n\, L_m.
+\end{equation}
+In SCBA mode, $\Gam^2$ is absorbed into the per-$\eps$ sum (it varies
+with $\eps$), leaving the prefactor without $\Gam^2$.
+
+\subsection{Effect on $\sigma_{xy}$}
+
+By default, the Berry curvature kernel uses $\Gam(E_n)$:
+\begin{equation}
+  \mathcal{K}_n = \sum_{m \neq n}
+  \frac{\mathrm{Im}[v^x_{nm}\,(v^y_{nm})^*]}{(E_n - E_m)^2 + \Gam(E_n)^2}.
+\end{equation}
+The broadening $\Gam(E_n)$ of the occupied state~$n$ regularizes the
+interband denominator.  In spectral gaps, $\Gam(E_n)$ drops to the
+floor $f_{\min}\,\Gam_0$, sharpening features without affecting
+Chern quantization.  Setting \texttt{scba\_xy\_constant = 1} reverts
+to constant~$\Gam_0$ in the denominator.
+
+\subsection{Units summary}
+
+\begin{center}
+\begin{tabular}{lll}
+  \hline
+  Quantity & Internal units & Notes \\
+  \hline
+  Eigenvalues (k-loop) & meV & converted to eV for Kubo \\
+  $\Gam_0$, $\Gam(E)$ & eV (internal), meV (output) & \\
+  Velocity $v_{nm}$ & $\Ang$/s & $A$ in $\Ang$, $H$ in eV, $\hbar$ in eV$\cdot$s \\
+  $A_m$ (mag.\ cell area) & $\Ang^2$ & $= pp^2\, A_{\mathrm{uc}} / (2\,qq) \times 10^{20}$ \\
+  $\hbar$ for transport & eV$\cdot$s & \texttt{HBAR\_EV} $= 6.582 \times 10^{-16}$ \\
+  $\sigma_{xx}$, $\sigma_{xy}$ & $e^2/h$ & dimensionless \\
+  $L_{12,xx}$, $L_{12,xy}$ & $e^2/h \cdot \mathrm{eV}$ & \\
+  \hline
+\end{tabular}
+\end{center}
+
+\subsection{Input parameters}
+
+\begin{center}
+\begin{tabular}{llp{7cm}}
+  \hline
+  Parameter & Default & Role \\
+  \hline
+  \texttt{broadening} & \texttt{'constant'} & Set to \texttt{'scba'} to enable \\
+  \texttt{Gamma} & 1.0\,meV & Bare broadening $\Gam_0$ \\
+  \texttt{scba\_mixing} & 0.3 & Linear mixing parameter $\alpha$ \\
+  \texttt{scba\_tol} & $10^{-4}$ & Convergence tolerance $\tau$ \\
+  \texttt{scba\_maxiter} & 200 & Maximum iterations \\
+  \texttt{scba\_floor} & 0.01 & Floor ratio $f_{\min}$ ($\Gam \ge f_{\min}\,\Gam_0$) \\
+  \texttt{scba\_anderson} & 5 & Anderson mixing depth $M$ (0 = linear only) \\
+  \hline
+\end{tabular}
+\end{center}
+
+%======================================================================
+
+\begin{thebibliography}{9}
+
+\bibitem{Ando1974}
+  T.~Ando,
+  ``Theory of Quantum Transport in a Two-Dimensional Electron System
+  under Magnetic Fields. II. Single-Site Approximation (SCBA),''
+  J.~Phys.\ Soc.\ Jpn.\ \textbf{36}, 1521 (1974).
+
+\bibitem{MacDonald1984}
+  A.~H.~MacDonald,
+  ``Quantized Hall effect in a hexagonal periodic potential,''
+  Phys.\ Rev.\ B \textbf{29}, 3057 (1984).
+
+\bibitem{TKNN1982}
+  D.~J.~Thouless, M.~Kohmoto, M.~P.~Nightingale, and M.~den~Nijs,
+  ``Quantized Hall Conductance in a Two-Dimensional Periodic Potential,''
+  Phys.\ Rev.\ Lett.\ \textbf{49}, 405 (1982).
+
+\bibitem{Bastin1971}
+  A.~Bastin, C.~Lewiner, O.~Betbeder-Matibet, and P.~Nozieres,
+  ``Quantum oscillations of the Hall effect of a fermion gas
+  with random impurity scattering,''
+  J.~Phys.\ Chem.\ Solids \textbf{32}, 1811 (1971).
+
+\bibitem{Streda1982}
+  P.~St\v{r}eda,
+  ``Theory of quantised Hall conductivity in two dimensions,''
+  J.~Phys.\ C \textbf{15}, L717 (1982).
+
+\end{thebibliography}
+
+\end{document}
