@@ -520,9 +520,25 @@ vy_nm = Psi_sel^dag @ Vy @ Psi_sel
 where `Psi_sel` selects bands whose k=0 eigenvalues fall within the
 Kubo energy window (mulist range ± `transport_buffer`, default = mulist
 width).  For SCBA, a tighter window (mulist ± 5×Γ₀) selects the
-eigenvalue-collection bands.  The eigenvalues are histogrammed into a DOS on the mulist energy grid
-(same binning as `calctype = 'dos'`) at no extra cost, since the
-diagonalization is already required for the transport calculation.
+eigenvalue-collection bands.  The eigenvalues are histogrammed into a
+crude DOS (`dos_K`, `dos_Kp`) on the mulist energy grid (same binning as
+`calctype = 'dos'`) at no extra cost, since the diagonalization is
+already required for the transport calculation.
+
+After the k-loop, a Lorentzian-broadened DOS (`dos_broad_K`,
+`dos_broad_Kp`) is computed on the mulist grid using all Kubo-selected
+eigenvalues:
+
+```
+rho(mu) = 1/(pi * Nk * 2*pp) * sum_j G(mu) / ((mu - E_j)^2 + G(mu)^2)
+```
+
+where `G(mu)` is the constant Gamma (CBA) or interpolated SCBA
+broadening at the probe energy.  The normalization `1/(Nk * 2*pp)` gives
+a DOS per primary moire unit cell (states/eV/cell), consistent with the
+SCBA self-consistency equation.  This broadened DOS is the physical
+spectral function that should be used for filling calculations and
+comparison with the SCBA Gamma(E) profile.
 
 ### Kubo formulas
 

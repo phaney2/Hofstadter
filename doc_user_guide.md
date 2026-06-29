@@ -213,8 +213,10 @@ magnetic BZ.
 | Key | Shape | Units | Description |
 |---|---|---|---|
 | `mulist` | (n_mu,) | meV | Chemical potential grid |
-| `dos_K` | (n_mu,) | counts | States per bin on mulist grid, K valley |
-| `dos_Kp` | (n_mu,) | counts | States per bin on mulist grid, K' valley |
+| `dos_K` | (n_mu,) | counts | Crude histogram DOS (states per bin), K valley |
+| `dos_Kp` | (n_mu,) | counts | Crude histogram DOS (states per bin), K' valley |
+| `dos_broad_K` | (n_mu,) | states/eV/cell | Lorentzian-broadened DOS, K valley |
+| `dos_broad_Kp` | (n_mu,) | states/eV/cell | Lorentzian-broadened DOS, K' valley |
 | `sigma_xx_K` | (n_mu,) | e²/h | Longitudinal conductivity, K valley |
 | `sigma_xy_K` | (n_mu,) | e²/h | Hall conductivity, K valley |
 | `L12_xx_K` | (n_mu,) | e²/h × eV | Longitudinal thermoelectric (L12), K valley |
@@ -228,17 +230,25 @@ magnetic BZ.
 | `Gamma_E` | (n_E,) | meV | Self-consistent broadening Γ(E) (SCBA mode only) |
 | `scba_niter` | int | -- | Number of SCBA iterations to convergence (SCBA mode only) |
 
-DOS is always included (histogrammed from eigenvalues during the transport
-k-loop at no extra cost, using the same energy grid as mulist).  Uses the
-standard interband Kubo formula for sigma_xy (broadened Berry curvature)
-and Kubo-Greenwood formula for sigma_xx (two spectral functions).
+Two DOS outputs are included: `dos_K`/`dos_Kp` is a crude eigenvalue
+histogram (states per mulist bin, weight 1/Nk per eigenvalue), and
+`dos_broad_K`/`dos_broad_Kp` is a Lorentzian-broadened DOS on the mulist
+grid in units of states/eV/cell.  The broadened DOS uses constant Γ₀
+(CBA) or the SCBA Γ(E) evaluated at each probe energy, with
+normalization `1/(π Nk 2pp)` consistent with the SCBA self-consistency
+equation.
+
+Uses the standard interband Kubo formula for sigma_xy (broadened Berry
+curvature) and Kubo-Greenwood formula for sigma_xx (two spectral
+functions).
 
 With `broadening = 'scba'`, the longitudinal conductivity (sigma_xx,
 L12_xx) uses an energy-dependent broadening Γ(E) determined by the
 self-consistent Born approximation, which captures the suppression of
 σ_xx in narrow subbands due to localization.  The Hall conductivity
-(sigma_xy, L12_xy) retains the constant broadening Γ₀ to preserve
-exact Chern number quantization in spectral gaps.
+(sigma_xy, L12_xy) also uses Γ(E_n) by default, sharpening features at
+low flux where subbands are narrower than Γ₀.  Set
+`scba_xy_constant = 1` to revert to constant Γ₀ in σ_xy.
 
 ### Zero-field output
 

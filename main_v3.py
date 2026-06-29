@@ -810,6 +810,9 @@ def do_calc(filepath):
         dos_weight = 1.0 / Nk_tot
         dos_K = np.zeros(n_mu) if 'K' in valley else None
         dos_Kp = np.zeros(n_mu) if 'Kp' in valley else None
+        nb_kubo = len(band_sel_kubo)
+        eigs_K_all = np.zeros((Nk_tot, nb_kubo)) if 'K' in valley else None
+        eigs_Kp_all = np.zeros((Nk_tot, nb_kubo)) if 'Kp' in valley else None
 
         pass_label = "transport, pass 2" if use_scba else "transport"
         print(f" Entering the k loop ({pass_label})")
@@ -834,12 +837,14 @@ def do_calc(filepath):
                 l12xx_K_acc[:] += l12xK
                 l12xy_K_acc[:] += l12yK
                 _bin_dos(eK, dos_K)
+                eigs_K_all[kc, :] = eK
             if sxKp is not None:
                 sxx_Kp_acc[:] += sxKp
                 sxy_Kp_acc[:] += syKp
                 l12xx_Kp_acc[:] += l12xKp
                 l12xy_Kp_acc[:] += l12yKp
                 _bin_dos(eKp, dos_Kp)
+                eigs_Kp_all[kc, :] = eKp
             done_count += 1
             pct = done_count * 100 // Nk_tot
             if pct >= next_pct:
@@ -861,6 +866,29 @@ def do_calc(filepath):
                 _accumulate(kc, *r)
 
         print(" Done with the k loop")
+
+        # --- Broadened DOS on mulist grid ---
+        dos_broad_K = None
+        dos_broad_Kp = None
+        dos_norm = 1.0 / (np.pi * Nk_tot * 2 * pp)
+        for v_label, eigs_all, out_name in [('K', eigs_K_all, 'dos_broad_K'),
+                                             ('Kp', eigs_Kp_all, 'dos_broad_Kp')]:
+            if eigs_all is None:
+                continue
+            eigs_flat_eV = eigs_all.flatten() / 1000.0
+            mu_eV = mulist_eV
+            dos_broad = np.zeros(n_mu)
+            for i, mu in enumerate(mu_eV):
+                if use_scba:
+                    G_mu = float(np.interp(mu, scba_E_grid, scba_Gamma_E))
+                else:
+                    G_mu = Gamma_eV
+                dos_broad[i] = dos_norm * np.sum(
+                    G_mu / ((mu - eigs_flat_eV) ** 2 + G_mu ** 2))
+            if v_label == 'K':
+                dos_broad_K = dos_broad
+            else:
+                dos_broad_Kp = dos_broad
 
         # --- Apply prefactors and mu_ref subtraction ---
         pf_xy = -4.0 * np.pi * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk_tot)
@@ -896,6 +924,7 @@ def do_calc(filepath):
                 'L12_xx_K': l12xx_K_acc[:n_mu],
                 'L12_xy_K': l12xy_K_acc[:n_mu],
                 'dos_K': dos_K,
+                'dos_broad_K': dos_broad_K,
             })
 
         if 'Kp' in valley:
@@ -912,6 +941,7 @@ def do_calc(filepath):
                 'L12_xx_Kp': l12xx_Kp_acc[:n_mu],
                 'L12_xy_Kp': l12xy_Kp_acc[:n_mu],
                 'dos_Kp': dos_Kp,
+                'dos_broad_Kp': dos_broad_Kp,
             })
 
         return result
