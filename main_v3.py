@@ -221,6 +221,10 @@ def _solve_scba(all_eigs_eV, Gamma0, pp, Nk, mixing=0.3, tol=1e-4,
     dos_norm = 1.0 / (np.pi * Nk * 2 * pp)
     chunk = max(1, 50_000_000 // n_eigs)
 
+    import time as _time
+    print(f"  SCBA: n_grid={n_grid}, n_eigs={n_eigs}, chunk={chunk}")
+    t_start = _time.time()
+
     M = max(0, anderson_depth)
     hist_x = []
     hist_r = []
@@ -240,6 +244,9 @@ def _solve_scba(all_eigs_eV, Gamma0, pp, Nk, mixing=0.3, tol=1e-4,
 
         R = Gamma_new - Gamma_E
         residual = np.max(np.abs(R)) / np.max(Gamma_E)
+        dt = _time.time() - t_start
+        print(f"  SCBA iter {it+1}: residual = {residual:.2e} ({dt:.1f}s)",
+              flush=True)
 
         if residual < tol:
             print(f"  SCBA converged in {it + 1} iterations (residual = {residual:.2e})")
@@ -575,7 +582,7 @@ def do_calc(filepath):
     if calctype == 'transport':
         mulist_meV = np.asarray(d.get('mulist', np.linspace(-50, 50, 200)))
         Gamma_meV = float(d.get('Gamma', 1.0))
-        nbands_transport = int(d.get('nbands_transport', 0))
+        transport_buffer_meV = d.get('transport_buffer', None)
         mu_ref_meV = d.get('mu_ref', None)
         kT_meV = float(d.get('kT', 0.0))
         broadening_mode = str(d.get('broadening', 'constant')).strip("'\"")
@@ -594,16 +601,57 @@ def do_calc(filepath):
         m_to_Ang = 1e10
         A_m_Ang2 = (pp ** 2 * uc_area / (2 * qq)) * m_to_Ang ** 2
 
-        if nbands_transport > 0:
-            idx_c = dim_total // 2
-            nb = nbands_transport
-            band_sel = np.arange(idx_c - nb // 2, idx_c + nb // 2)
+        # --- Energy-based band selection via k=0 probe ---
+        mu_min, mu_max = mulist_meV.min(), mulist_meV.max()
+        mu_range = mu_max - mu_min
+        if transport_buffer_meV is not None:
+            kubo_buffer = float(transport_buffer_meV)
         else:
-            nb = dim_total
-            band_sel = np.arange(dim_total)
+            kubo_buffer = mu_range
+        kubo_lo = mu_min - kubo_buffer
+        kubo_hi = mu_max + kubo_buffer
+        scba_buffer = 5.0 * Gamma_meV
+        scba_lo = mu_min - scba_buffer
+        scba_hi = mu_max + scba_buffer
+
+        kpt_probe = np.array([0.0, 0.0])
+        kpts_probe = kpt_probe - M_mag
+        kx_p, ky_p = kpts_probe
+        if 'K' in valley:
+            tp1 = np.exp(1j * (pp / qq) * kx_p * Lx)
+            tp2 = np.exp(-1j * (pp / qq) * kx_p * Lx / 2) * np.exp(1j * ky_p * Ly * (pp / qq))
+            tp3 = np.exp(-1j * (pp / qq) * kx_p * Lx / 2) * np.exp(-1j * ky_p * Ly * (pp / qq))
+            V_probe = gamma * tp1 * term1_K + tp2 * term2_K + tp3 * term3_K
+            H_probe = H_base_K.copy()
+            H_probe[moire_offset:, moire_offset:] += v0 * np.eye(dim_MLG) + V_probe + V_probe.T.conj()
+            probe_eigs = np.sort(linalg.eigvalsh(H_probe)) * 1000 / Q_E
+        else:
+            tp1 = np.exp(-1j * (pp / qq) * kx_p * Lx)
+            tp2 = np.exp(1j * (pp / qq) * kx_p * Lx / 2) * np.exp(-1j * ky_p * Ly * (pp / qq))
+            tp3 = np.exp(1j * (pp / qq) * kx_p * Lx / 2) * np.exp(1j * ky_p * Ly * (pp / qq))
+            V_probe = gamma * tp1 * term1_Kp + tp2 * term2_Kp + tp3 * term3_Kp
+            H_probe = H_base_Kp.copy()
+            H_probe[moire_offset:, moire_offset:] += v0 * np.eye(dim_MLG) + V_probe + V_probe.T.conj()
+            probe_eigs = np.sort(linalg.eigvalsh(H_probe)) * 1000 / Q_E
+
+        kubo_mask = (probe_eigs >= kubo_lo) & (probe_eigs <= kubo_hi)
+        band_sel_kubo = np.where(kubo_mask)[0]
+        if len(band_sel_kubo) == 0:
+            band_sel_kubo = np.arange(dim_total)
+
+        scba_mask = (probe_eigs >= scba_lo) & (probe_eigs <= scba_hi)
+        band_sel_scba = np.where(scba_mask)[0]
+        if len(band_sel_scba) == 0:
+            band_sel_scba = np.arange(dim_total)
+
+        nb_kubo = len(band_sel_kubo)
+        nb_scba = len(band_sel_scba)
 
         bmode_str = f"SCBA (Gamma0={Gamma_meV} meV)" if use_scba else f"Gamma = {Gamma_meV} meV"
-        print(f"  Transport: {bmode_str}, kT = {kT_meV} meV, {len(mulist_meV)} mu points, {nb} bands")
+        print(f"  Transport: {bmode_str}, kT = {kT_meV} meV, {len(mulist_meV)} mu points")
+        print(f"  Band selection (k=0 probe): Kubo={nb_kubo}/{dim_total} bands [{kubo_lo:.1f}, {kubo_hi:.1f}] meV")
+        if use_scba:
+            print(f"                               SCBA={nb_scba}/{dim_total} bands [{scba_lo:.1f}, {scba_hi:.1f}] meV")
 
         # --- Build velocity operators: v = (i/hbar)[A, H_base] ---
         # Work in eV / Angstrom / eV*s  →  velocity in Ang/s
@@ -654,7 +702,7 @@ def do_calc(filepath):
                 'moire_offset': moire_offset,
                 'valley': valley, 'M_mag': M_mag,
                 'v0_eye': v0_eye_scaled,
-                'transport_band_sel': band_sel,
+                'transport_band_sel': band_sel_scba,
             }
             if 'K' in valley:
                 eig_shared.update({
@@ -672,8 +720,8 @@ def do_calc(filepath):
                 })
 
             print(" SCBA pass 1: collecting eigenvalues")
-            all_eigs_K = np.zeros((Nk_tot, nb)) if 'K' in valley else None
-            all_eigs_Kp = np.zeros((Nk_tot, nb)) if 'Kp' in valley else None
+            all_eigs_K = np.zeros((Nk_tot, nb_scba)) if 'K' in valley else None
+            all_eigs_Kp = np.zeros((Nk_tot, nb_scba)) if 'Kp' in valley else None
 
             if isparallel:
                 default_nw = int(os.environ.get('SLURM_CPUS_PER_TASK',
@@ -716,7 +764,7 @@ def do_calc(filepath):
             'moire_offset': moire_offset,
             'valley': valley, 'M_mag': M_mag,
             'v0_eye': v0_eye_scaled,
-            'transport_band_sel': band_sel,
+            'transport_band_sel': band_sel_kubo,
             'all_mu_eV': all_mu,
             'Gamma_eV': Gamma_eV,
             'kT_eV': kT_eV,

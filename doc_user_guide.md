@@ -95,7 +95,7 @@ variables (e.g., `elist` can use `nebin`).
 | `outputfile` | string | `bands_p{pp}_q{qq}.npz` | Output filename; use `.mat` extension for MATLAB format |
 | `mulist` | array (meV) | `linspace(-50,50,200)` | Chemical potential grid (transport mode only) |
 | `Gamma` | float (meV) | `1.0` | Broadening parameter (transport mode only). In constant mode: Lorentzian half-width. In SCBA mode: disorder strength Γ₀. |
-| `nbands_transport` | int | `0` | Number of bands around charge neutrality for transport sums; 0 = all bands |
+| `transport_buffer` | float (meV) | mulist range | Energy buffer beyond mulist range for Kubo band selection. Default: full mulist width on each side. |
 | `kT` | float (meV) | `0.0` | Thermal energy for Fermi-Dirac occupation (transport mode only). 0 = zero temperature (step function). |
 | `mu_ref` | float (meV) | (none) | Reference chemical potential for sigma_xy (transport mode only). When set, sigma_xy is computed relative to this value: sigma_xy(mu_ref) = 0. Place in a spectral gap to get integer-quantized Hall conductivity in neighboring gaps. |
 | `broadening` | string | `'constant'` | Broadening model: `'constant'` = fixed Lorentzian width, `'scba'` = self-consistent Born approximation (energy-dependent Γ(E)). |
@@ -403,7 +403,6 @@ valley = {'K'};
 mulist = linspace(-100, 100, 400);
 Gamma = 2.0;
 kT = 1.0;
-nbands_transport = 0;
 mu_ref = 16.0;
 outputfile = 'transport_p3_q1.mat';
 ```
@@ -435,7 +434,6 @@ mulist = linspace(-100, 100, 400);
 Gamma = 2.0;
 broadening = 'scba';
 kT = 1.0;
-nbands_transport = 0;
 mu_ref = 16.0;
 outputfile = 'transport_scba_p3_q1.mat';
 ```

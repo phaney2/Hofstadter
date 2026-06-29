@@ -517,8 +517,10 @@ vx_nm = Psi_sel^dag @ Vx @ Psi_sel
 vy_nm = Psi_sel^dag @ Vy @ Psi_sel
 ```
 
-where `Psi_sel` selects `nbands_transport` bands around charge neutrality
-(or all bands if `nbands_transport = 0`).  The eigenvalues are histogrammed into a DOS on the mulist energy grid
+where `Psi_sel` selects bands whose k=0 eigenvalues fall within the
+Kubo energy window (mulist range ± `transport_buffer`, default = mulist
+width).  For SCBA, a tighter window (mulist ± 5×Γ₀) selects the
+eigenvalue-collection bands.  The eigenvalues are histogrammed into a DOS on the mulist energy grid
 (same binning as `calctype = 'dos'`) at no extra cost, since the
 diagonalization is already required for the transport calculation.
 
