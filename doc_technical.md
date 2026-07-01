@@ -633,6 +633,25 @@ already well-behaved).
 sigma_xy reduces to the TKNN/Chern number formula.  Quantized plateaus
 of sigma_xy in spectral gaps are a good numerical check.
 
+### Gamma list (multi-broadening post-processing)
+
+The input parameter `Gamma` accepts a scalar or a list of values (in meV).
+When a list is provided in constant-broadening (CBA) mode, the expensive
+eigenvalue decomposition and velocity matrix element computation run once,
+and the cheap Kubo summation is repeated for each Gamma value.  The
+marginal cost per extra Gamma is O(nb^2) per k-point (the Lorentzian
+spectral functions and Berry curvature kernel), compared to O(dim^3) for
+the eigensolve — typically 3-4 orders of magnitude cheaper.
+
+All transport output arrays (`sigma_xx`, `sigma_xy`, `L12_xx`, `L12_xy`,
+`dos_broad`) become 2D with shape `(n_gamma, n_mu)`.  The output dict
+includes a `Gamma_list` key (in meV).  When Gamma is a scalar, all arrays
+are 1D `(n_mu,)` and `Gamma_list` is absent — backward compatible.
+
+SCBA mode requires a single Gamma (disorder strength Γ₀).  If a list is
+passed with `broadening = 'scba'`, a warning is printed and only the first
+value is used.
+
 ### Self-consistent Born approximation (SCBA)
 
 With `broadening = 'scba'`, the constant broadening Gamma is replaced by

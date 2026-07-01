@@ -94,7 +94,7 @@ variables (e.g., `elist` can use `nebin`).
 | `elist` | array | `linspace(-300,300,nebin)` | Energy grid in meV (for dos mode) |
 | `outputfile` | string | `bands_p{pp}_q{qq}.npz` | Output filename; use `.mat` extension for MATLAB format |
 | `mulist` | array (meV) | `linspace(-50,50,200)` | Chemical potential grid (transport mode only) |
-| `Gamma` | float (meV) | `1.0` | Broadening parameter (transport mode only). In constant mode: Lorentzian half-width. In SCBA mode: disorder strength Γ₀. |
+| `Gamma` | float or array (meV) | `1.0` | Broadening parameter (transport mode only). Scalar or list of values. In constant mode: Lorentzian half-width(s); when a list is given, transport coefficients are computed for each Γ value at negligible extra cost (the expensive diagonalization runs once). In SCBA mode: disorder strength Γ₀ (must be scalar). |
 | `transport_buffer` | float (meV) | mulist range | Energy buffer beyond mulist range for Kubo band selection. Default: full mulist width on each side. |
 | `kT` | float (meV) | `0.0` | Thermal energy for Fermi-Dirac occupation (transport mode only). 0 = zero temperature (step function). |
 | `mu_ref` | float (meV) | (none) | Reference chemical potential for sigma_xy (transport mode only). When set, sigma_xy is computed relative to this value: sigma_xy(mu_ref) = 0. Place in a spectral gap to get integer-quantized Hall conductivity in neighboring gaps. |
@@ -213,22 +213,30 @@ magnetic BZ.
 | Key | Shape | Units | Description |
 |---|---|---|---|
 | `mulist` | (n_mu,) | meV | Chemical potential grid |
+| `Gamma_list` | (n_gamma,) | meV | Gamma values used (only present when Gamma is a list with n_gamma > 1) |
 | `dos_K` | (n_mu,) | counts | Crude histogram DOS (states per bin), K valley |
 | `dos_Kp` | (n_mu,) | counts | Crude histogram DOS (states per bin), K' valley |
-| `dos_broad_K` | (n_mu,) | states/eV/cell | Lorentzian-broadened DOS, K valley |
-| `dos_broad_Kp` | (n_mu,) | states/eV/cell | Lorentzian-broadened DOS, K' valley |
-| `sigma_xx_K` | (n_mu,) | e²/h | Longitudinal conductivity, K valley |
-| `sigma_xy_K` | (n_mu,) | e²/h | Hall conductivity, K valley |
-| `L12_xx_K` | (n_mu,) | e²/h × eV | Longitudinal thermoelectric (L12), K valley |
-| `L12_xy_K` | (n_mu,) | e²/h × eV | Transverse thermoelectric (L12), K valley |
-| `sigma_xx_Kp` | (n_mu,) | e²/h | Longitudinal conductivity, K' valley |
-| `sigma_xy_Kp` | (n_mu,) | e²/h | Hall conductivity, K' valley |
-| `L12_xx_Kp` | (n_mu,) | e²/h × eV | Longitudinal thermoelectric (L12), K' valley |
-| `L12_xy_Kp` | (n_mu,) | e²/h × eV | Transverse thermoelectric (L12), K' valley |
+| `dos_broad_K` | (n_mu,) or (n_gamma, n_mu) | states/eV/cell | Lorentzian-broadened DOS, K valley |
+| `dos_broad_Kp` | (n_mu,) or (n_gamma, n_mu) | states/eV/cell | Lorentzian-broadened DOS, K' valley |
+| `sigma_xx_K` | (n_mu,) or (n_gamma, n_mu) | e²/h | Longitudinal conductivity, K valley |
+| `sigma_xy_K` | (n_mu,) or (n_gamma, n_mu) | e²/h | Hall conductivity, K valley |
+| `L12_xx_K` | (n_mu,) or (n_gamma, n_mu) | e²/h × eV | Longitudinal thermoelectric (L12), K valley |
+| `L12_xy_K` | (n_mu,) or (n_gamma, n_mu) | e²/h × eV | Transverse thermoelectric (L12), K valley |
+| `sigma_xx_Kp` | (n_mu,) or (n_gamma, n_mu) | e²/h | Longitudinal conductivity, K' valley |
+| `sigma_xy_Kp` | (n_mu,) or (n_gamma, n_mu) | e²/h | Hall conductivity, K' valley |
+| `L12_xx_Kp` | (n_mu,) or (n_gamma, n_mu) | e²/h × eV | Longitudinal thermoelectric (L12), K' valley |
+| `L12_xy_Kp` | (n_mu,) or (n_gamma, n_mu) | e²/h × eV | Transverse thermoelectric (L12), K' valley |
 | `broadening` | string | -- | Broadening model used: `'constant'` or `'scba'` |
 | `Gamma_E_grid` | (n_E,) | meV | Energy grid for SCBA Γ(E) (SCBA mode only) |
 | `Gamma_E` | (n_E,) | meV | Self-consistent broadening Γ(E) (SCBA mode only) |
 | `scba_niter` | int | -- | Number of SCBA iterations to convergence (SCBA mode only) |
+
+When `Gamma` is a scalar (default), all transport arrays are 1D with shape
+`(n_mu,)` — fully backward compatible.  When `Gamma` is a list of n_gamma
+values, transport arrays become 2D with shape `(n_gamma, n_mu)`.  The
+crude histogram DOS (`dos_K`, `dos_Kp`) is always 1D since it is
+Gamma-independent.  SCBA mode requires scalar Gamma (a list triggers a
+warning and only the first value is used as Γ₀).
 
 Two DOS outputs are included: `dos_K`/`dos_Kp` is a crude eigenvalue
 histogram (states per mulist bin, weight 1/Nk per eigenvalue), and
@@ -416,6 +424,36 @@ Gamma = 2.0;
 kT = 1.0;
 mu_ref = 16.0;
 outputfile = 'transport_p3_q1.mat';
+```
+
+### Transport with multiple Gamma values
+
+```
+isparallel = 1;
+theta = 0.0;
+qq = 1;
+pp = 3;
+g0 = 2796;
+g1 = 340;
+g3 = 0;
+g4 = 0;
+delta = 0;
+v0 = 30;
+v1 = 21;
+w = 110;
+eta = 2;
+U = 0*[1 1];
+nk1 = 10;
+nk2 = 10;
+LL_multiplier = 6;
+Nmax = 1000;
+calctype = 'transport';
+valley = {'K'};
+mulist = linspace(-100, 100, 400);
+Gamma = [0.5, 1.0, 2.0, 4.0];
+kT = 1.0;
+mu_ref = 16.0;
+outputfile = 'transport_multiG_p3_q1.mat';
 ```
 
 ### Transport with SCBA broadening

@@ -106,7 +106,7 @@ def _solve_kpoint(args):
 def _transport_kubo_single_k(E_meV, vx, vy, d):
     """Compute per-k-point contribution to transport sums.
 
-    Returns (sxx, sxy, l12xx, l12xy) each shape (n_mu,).
+    Returns (sxx, sxy, l12xx, l12xy) each shape (n_gamma, n_mu).
     Prefactors (pp, area, 1/Nk) are applied in the caller.
 
     In SCBA mode (d['scba_Gamma_E'] is not None), sxx and l12xx include
@@ -116,8 +116,8 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     """
     E = E_meV / 1000.0
     all_mu = d['all_mu_eV']
-    G = d['Gamma_eV']
-    G2 = G * G
+    Gamma_list = d['Gamma_list_eV']
+    n_gamma = len(Gamma_list)
     kT = d['kT_eV']
 
     scba_grid = d.get('scba_E_grid')
@@ -128,70 +128,80 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     vx_sq = np.abs(vx) ** 2
     Omega = np.imag(vx * np.conj(vy))
     D2 = (E[:, None] - E[None, :]) ** 2
-    if use_scba and not scba_xy_constant:
-        G_n = np.interp(E, scba_grid, scba_Gamma)
-        G2_n = G_n ** 2
-        inv_D2G2 = 1.0 / (D2 + G2_n[:, None])
-    else:
-        inv_D2G2 = 1.0 / (D2 + G2)
 
     n_mu = len(all_mu)
-    sxx = np.zeros(n_mu)
-    sxy = np.zeros(n_mu)
-    l12xx = np.zeros(n_mu)
-    l12xy = np.zeros(n_mu)
+    sxx = np.zeros((n_gamma, n_mu))
+    sxy = np.zeros((n_gamma, n_mu))
+    l12xx = np.zeros((n_gamma, n_mu))
+    l12xy = np.zeros((n_gamma, n_mu))
 
-    K_xy = Omega * inv_D2G2
-    np.fill_diagonal(K_xy, 0.0)
-    K_n = np.sum(K_xy, axis=1)
+    sort_idx = np.argsort(E)
+    E_sorted = E[sort_idx]
 
     if kT > 0:
         margin = 10.0 * kT
         eps_lo = all_mu.min() - margin
         eps_hi = all_mu.max() + margin
-        G_for_grid = G if not use_scba else np.min(scba_Gamma)
+        if use_scba:
+            G_for_grid = np.min(scba_Gamma)
+        else:
+            G_for_grid = np.min(Gamma_list)
         d_eps = min(G_for_grid, kT) / 5.0
         n_eps = max(int(np.ceil((eps_hi - eps_lo) / d_eps)) + 1, 50)
         eps_grid = np.linspace(eps_lo, eps_hi, n_eps)
+        dE2 = (eps_grid[:, None] - E[None, :]) ** 2
 
-        if use_scba:
-            G_eps = np.interp(eps_grid, scba_grid, scba_Gamma)
-            G2_eps = G_eps ** 2
-            L_all = 1.0 / ((eps_grid[:, None] - E[None, :]) ** 2
-                           + G2_eps[:, None])
-            Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1) * G2_eps
+    for ig, G in enumerate(Gamma_list):
+        G2 = G * G
+
+        if use_scba and not scba_xy_constant:
+            G_n = np.interp(E, scba_grid, scba_Gamma)
+            G2_n = G_n ** 2
+            inv_D2G2 = 1.0 / (D2 + G2_n[:, None])
         else:
-            L_all = 1.0 / ((eps_grid[:, None] - E[None, :]) ** 2 + G2)
-            Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1)
+            inv_D2G2 = 1.0 / (D2 + G2)
 
-        sort_idx = np.argsort(E)
-        E_sorted = E[sort_idx]
+        K_xy = Omega * inv_D2G2
+        np.fill_diagonal(K_xy, 0.0)
+        K_n = np.sum(K_xy, axis=1)
+
         K_cumsum = np.concatenate(([0.0], np.cumsum(K_n[sort_idx])))
-        bins = np.searchsorted(E_sorted, eps_grid, side='right')
-        Phi_xy = K_cumsum[bins]
 
-    for i_mu, mu in enumerate(all_mu):
         if kT > 0:
-            x_eps = (eps_grid - mu) / kT
-            x_eps_clip = np.clip(x_eps, -500, 500)
-            f_eps = 1.0 / (np.exp(x_eps_clip) + 1.0)
-            neg_dfde = (1.0 / kT) * f_eps * (1.0 - f_eps)
-            sxx[i_mu] = np.trapezoid(neg_dfde * Phi_xx, eps_grid)
-            sxy[i_mu] = np.trapezoid(neg_dfde * Phi_xy, eps_grid)
-            l12xx[i_mu] = np.trapezoid((eps_grid - mu) * neg_dfde * Phi_xx,
-                                   eps_grid)
-            l12xy[i_mu] = np.trapezoid((eps_grid - mu) * neg_dfde * Phi_xy,
-                                   eps_grid)
-        else:
             if use_scba:
-                G_mu = float(np.interp(mu, scba_grid, scba_Gamma))
-                G2_mu = G_mu * G_mu
-                L = 1.0 / ((E - mu) ** 2 + G2_mu)
-                sxx[i_mu] = G2_mu * (L @ vx_sq @ L)
+                G_eps = np.interp(eps_grid, scba_grid, scba_Gamma)
+                G2_eps = G_eps ** 2
+                L_all = 1.0 / (dE2 + G2_eps[:, None])
+                Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1) * G2_eps
             else:
-                L = 1.0 / ((E - mu) ** 2 + G2)
-                sxx[i_mu] = L @ vx_sq @ L
-            sxy[i_mu] = np.sum(K_n[E < mu])
+                L_all = 1.0 / (dE2 + G2)
+                Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1)
+
+            bins = np.searchsorted(E_sorted, eps_grid, side='right')
+            Phi_xy = K_cumsum[bins]
+
+        for i_mu, mu in enumerate(all_mu):
+            if kT > 0:
+                x_eps = (eps_grid - mu) / kT
+                x_eps_clip = np.clip(x_eps, -500, 500)
+                f_eps = 1.0 / (np.exp(x_eps_clip) + 1.0)
+                neg_dfde = (1.0 / kT) * f_eps * (1.0 - f_eps)
+                sxx[ig, i_mu] = np.trapezoid(neg_dfde * Phi_xx, eps_grid)
+                sxy[ig, i_mu] = np.trapezoid(neg_dfde * Phi_xy, eps_grid)
+                l12xx[ig, i_mu] = np.trapezoid(
+                    (eps_grid - mu) * neg_dfde * Phi_xx, eps_grid)
+                l12xy[ig, i_mu] = np.trapezoid(
+                    (eps_grid - mu) * neg_dfde * Phi_xy, eps_grid)
+            else:
+                if use_scba:
+                    G_mu = float(np.interp(mu, scba_grid, scba_Gamma))
+                    G2_mu = G_mu * G_mu
+                    L = 1.0 / ((E - mu) ** 2 + G2_mu)
+                    sxx[ig, i_mu] = G2_mu * (L @ vx_sq @ L)
+                else:
+                    L = 1.0 / ((E - mu) ** 2 + G2)
+                    sxx[ig, i_mu] = L @ vx_sq @ L
+                sxy[ig, i_mu] = np.sum(K_n[E < mu])
 
     return sxx, sxy, l12xx, l12xy
 
@@ -587,7 +597,8 @@ def do_calc(filepath):
     # =======================================================================
     if calctype == 'transport':
         mulist_meV = np.asarray(d.get('mulist', np.linspace(-50, 50, 200)))
-        Gamma_meV = float(d.get('Gamma', 1.0))
+        Gamma_input = d.get('Gamma', 1.0)
+        Gamma_list_meV = np.atleast_1d(np.asarray(Gamma_input, dtype=float))
         transport_buffer_meV = d.get('transport_buffer', None)
         mu_ref_meV = d.get('mu_ref', None)
         kT_meV = float(d.get('kT', 0.0))
@@ -600,8 +611,15 @@ def do_calc(filepath):
         scba_xy_constant = int(d.get('scba_xy_constant', 0))
         use_scba = broadening_mode == 'scba'
 
+        if use_scba and len(Gamma_list_meV) > 1:
+            print("  WARNING: Gamma list ignored in SCBA mode; using first value as Gamma_0")
+            Gamma_list_meV = Gamma_list_meV[:1]
+
+        n_gamma = len(Gamma_list_meV)
+        Gamma_list_eV = Gamma_list_meV / 1000.0
+        Gamma_eV = Gamma_list_eV[0]
+
         mulist_eV = mulist_meV / 1000.0
-        Gamma_eV = Gamma_meV / 1000.0
         kT_eV = kT_meV / 1000.0
         mu_ref_eV = float(mu_ref_meV) / 1000.0 if mu_ref_meV is not None else None
         J_to_eV = 1.0 / Q_E
@@ -617,7 +635,7 @@ def do_calc(filepath):
             kubo_buffer = mu_range
         kubo_lo = mu_min - kubo_buffer
         kubo_hi = mu_max + kubo_buffer
-        scba_buffer = 5.0 * Gamma_meV
+        scba_buffer = 5.0 * float(Gamma_list_meV[0])
         scba_lo = mu_min - scba_buffer
         scba_hi = mu_max + scba_buffer
 
@@ -654,7 +672,13 @@ def do_calc(filepath):
         nb_kubo = len(band_sel_kubo)
         nb_scba = len(band_sel_scba)
 
-        bmode_str = f"SCBA (Gamma0={Gamma_meV} meV)" if use_scba else f"Gamma = {Gamma_meV} meV"
+        if use_scba:
+            bmode_str = f"SCBA (Gamma0={Gamma_list_meV[0]} meV)"
+        elif n_gamma == 1:
+            bmode_str = f"Gamma = {Gamma_list_meV[0]} meV"
+        else:
+            bmode_str = (f"Gamma = [{Gamma_list_meV[0]}, ..., "
+                         f"{Gamma_list_meV[-1]}] meV ({n_gamma} values)")
         print(f"  Transport: {bmode_str}, kT = {kT_meV} meV, {len(mulist_meV)} mu points")
         print(f"  Band selection (k=0 probe): Kubo={nb_kubo}/{dim_total} bands [{kubo_lo:.1f}, {kubo_hi:.1f}] meV")
         if use_scba:
@@ -773,7 +797,7 @@ def do_calc(filepath):
             'v0_eye': v0_eye_scaled,
             'transport_band_sel': band_sel_kubo,
             'all_mu_eV': all_mu,
-            'Gamma_eV': Gamma_eV,
+            'Gamma_list_eV': Gamma_list_eV,
             'kT_eV': kT_eV,
             'scba_E_grid': scba_E_grid,
             'scba_Gamma_E': scba_Gamma_E,
@@ -798,14 +822,14 @@ def do_calc(filepath):
 
         # --- Accumulators for per-k-point Kubo partial sums ---
         n_mu = len(mulist_eV)
-        sxx_K_acc = np.zeros(n_all) if 'K' in valley else None
-        sxy_K_acc = np.zeros(n_all) if 'K' in valley else None
-        l12xx_K_acc = np.zeros(n_all) if 'K' in valley else None
-        l12xy_K_acc = np.zeros(n_all) if 'K' in valley else None
-        sxx_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
-        sxy_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
-        l12xx_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
-        l12xy_Kp_acc = np.zeros(n_all) if 'Kp' in valley else None
+        sxx_K_acc = np.zeros((n_gamma, n_all)) if 'K' in valley else None
+        sxy_K_acc = np.zeros((n_gamma, n_all)) if 'K' in valley else None
+        l12xx_K_acc = np.zeros((n_gamma, n_all)) if 'K' in valley else None
+        l12xy_K_acc = np.zeros((n_gamma, n_all)) if 'K' in valley else None
+        sxx_Kp_acc = np.zeros((n_gamma, n_all)) if 'Kp' in valley else None
+        sxy_Kp_acc = np.zeros((n_gamma, n_all)) if 'Kp' in valley else None
+        l12xx_Kp_acc = np.zeros((n_gamma, n_all)) if 'Kp' in valley else None
+        l12xy_Kp_acc = np.zeros((n_gamma, n_all)) if 'Kp' in valley else None
 
         dos_weight = 1.0 / Nk_tot
         dos_K = np.zeros(n_mu) if 'K' in valley else None
@@ -832,17 +856,17 @@ def do_calc(filepath):
                         sxKp, syKp, l12xKp, l12yKp, eKp):
             nonlocal done_count, next_pct
             if sxK is not None:
-                sxx_K_acc[:] += sxK
-                sxy_K_acc[:] += syK
-                l12xx_K_acc[:] += l12xK
-                l12xy_K_acc[:] += l12yK
+                sxx_K_acc[:, :] += sxK
+                sxy_K_acc[:, :] += syK
+                l12xx_K_acc[:, :] += l12xK
+                l12xy_K_acc[:, :] += l12yK
                 _bin_dos(eK, dos_K)
                 eigs_K_all[kc, :] = eK
             if sxKp is not None:
-                sxx_Kp_acc[:] += sxKp
-                sxy_Kp_acc[:] += syKp
-                l12xx_Kp_acc[:] += l12xKp
-                l12xy_Kp_acc[:] += l12yKp
+                sxx_Kp_acc[:, :] += sxKp
+                sxy_Kp_acc[:, :] += syKp
+                l12xx_Kp_acc[:, :] += l12xKp
+                l12xy_Kp_acc[:, :] += l12yKp
                 _bin_dos(eKp, dos_Kp)
                 eigs_Kp_all[kc, :] = eKp
             done_count += 1
@@ -871,20 +895,20 @@ def do_calc(filepath):
         dos_broad_K = None
         dos_broad_Kp = None
         dos_norm = 1.0 / (np.pi * Nk_tot * 2 * pp)
-        for v_label, eigs_all, out_name in [('K', eigs_K_all, 'dos_broad_K'),
-                                             ('Kp', eigs_Kp_all, 'dos_broad_Kp')]:
+        for v_label, eigs_all in [('K', eigs_K_all), ('Kp', eigs_Kp_all)]:
             if eigs_all is None:
                 continue
             eigs_flat_eV = eigs_all.flatten() / 1000.0
             mu_eV = mulist_eV
-            dos_broad = np.zeros(n_mu)
-            for i, mu in enumerate(mu_eV):
-                if use_scba:
-                    G_mu = float(np.interp(mu, scba_E_grid, scba_Gamma_E))
-                else:
-                    G_mu = Gamma_eV
-                dos_broad[i] = dos_norm * np.sum(
-                    G_mu / ((mu - eigs_flat_eV) ** 2 + G_mu ** 2))
+            dos_broad = np.zeros((n_gamma, n_mu))
+            for ig in range(n_gamma):
+                for i, mu in enumerate(mu_eV):
+                    if use_scba:
+                        G_mu = float(np.interp(mu, scba_E_grid, scba_Gamma_E))
+                    else:
+                        G_mu = float(Gamma_list_eV[ig])
+                    dos_broad[ig, i] = dos_norm * np.sum(
+                        G_mu / ((mu - eigs_flat_eV) ** 2 + G_mu ** 2))
             if v_label == 'K':
                 dos_broad_K = dos_broad
             else:
@@ -895,11 +919,13 @@ def do_calc(filepath):
         if use_scba:
             pf_xx = 4.0 * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk_tot)
         else:
-            G2 = Gamma_eV * Gamma_eV
-            pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2 / (A_m_Ang2 * Nk_tot)
+            G2_list = Gamma_list_eV ** 2
+            pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2_list / (A_m_Ang2 * Nk_tot)
 
         result = {'calctype': 'transport', 'params': inp,
                   'mulist': mulist_meV, 'broadening': broadening_mode}
+        if n_gamma > 1:
+            result['Gamma_list'] = Gamma_list_meV
         if use_scba:
             result.update({
                 'Gamma_E_grid': scba_E_grid * 1000.0,
@@ -912,37 +938,55 @@ def do_calc(filepath):
 
         if 'K' in valley:
             sxy_K_acc *= pf_xy
-            sxx_K_acc *= pf_xx
             l12xy_K_acc *= pf_xy
-            l12xx_K_acc *= pf_xx
+            if use_scba:
+                sxx_K_acc *= pf_xx
+                l12xx_K_acc *= pf_xx
+            else:
+                sxx_K_acc *= pf_xx[:, None]
+                l12xx_K_acc *= pf_xx[:, None]
             if compute_ref:
-                sxy_K_acc[:n_mu] -= sxy_K_acc[n_mu]
-                l12xy_K_acc[:n_mu] -= l12xy_K_acc[n_mu]
-            result.update({
-                'sigma_xx_K': sxx_K_acc[:n_mu],
-                'sigma_xy_K': sxy_K_acc[:n_mu],
-                'L12_xx_K': l12xx_K_acc[:n_mu],
-                'L12_xy_K': l12xy_K_acc[:n_mu],
+                sxy_K_acc[:, :n_mu] -= sxy_K_acc[:, n_mu:n_mu+1]
+                l12xy_K_acc[:, :n_mu] -= l12xy_K_acc[:, n_mu:n_mu+1]
+            out_K = {
+                'sigma_xx_K': sxx_K_acc[:, :n_mu],
+                'sigma_xy_K': sxy_K_acc[:, :n_mu],
+                'L12_xx_K': l12xx_K_acc[:, :n_mu],
+                'L12_xy_K': l12xy_K_acc[:, :n_mu],
                 'dos_K': dos_K,
                 'dos_broad_K': dos_broad_K,
-            })
+            }
+            if n_gamma == 1:
+                for k in ('sigma_xx_K', 'sigma_xy_K', 'L12_xx_K', 'L12_xy_K',
+                           'dos_broad_K'):
+                    out_K[k] = out_K[k].squeeze(axis=0)
+            result.update(out_K)
 
         if 'Kp' in valley:
             sxy_Kp_acc *= pf_xy
-            sxx_Kp_acc *= pf_xx
             l12xy_Kp_acc *= pf_xy
-            l12xx_Kp_acc *= pf_xx
+            if use_scba:
+                sxx_Kp_acc *= pf_xx
+                l12xx_Kp_acc *= pf_xx
+            else:
+                sxx_Kp_acc *= pf_xx[:, None]
+                l12xx_Kp_acc *= pf_xx[:, None]
             if compute_ref:
-                sxy_Kp_acc[:n_mu] -= sxy_Kp_acc[n_mu]
-                l12xy_Kp_acc[:n_mu] -= l12xy_Kp_acc[n_mu]
-            result.update({
-                'sigma_xx_Kp': sxx_Kp_acc[:n_mu],
-                'sigma_xy_Kp': sxy_Kp_acc[:n_mu],
-                'L12_xx_Kp': l12xx_Kp_acc[:n_mu],
-                'L12_xy_Kp': l12xy_Kp_acc[:n_mu],
+                sxy_Kp_acc[:, :n_mu] -= sxy_Kp_acc[:, n_mu:n_mu+1]
+                l12xy_Kp_acc[:, :n_mu] -= l12xy_Kp_acc[:, n_mu:n_mu+1]
+            out_Kp = {
+                'sigma_xx_Kp': sxx_Kp_acc[:, :n_mu],
+                'sigma_xy_Kp': sxy_Kp_acc[:, :n_mu],
+                'L12_xx_Kp': l12xx_Kp_acc[:, :n_mu],
+                'L12_xy_Kp': l12xy_Kp_acc[:, :n_mu],
                 'dos_Kp': dos_Kp,
                 'dos_broad_Kp': dos_broad_Kp,
-            })
+            }
+            if n_gamma == 1:
+                for k in ('sigma_xx_Kp', 'sigma_xy_Kp', 'L12_xx_Kp',
+                           'L12_xy_Kp', 'dos_broad_Kp'):
+                    out_Kp[k] = out_Kp[k].squeeze(axis=0)
+            result.update(out_Kp)
 
         return result
 
