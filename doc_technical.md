@@ -518,8 +518,10 @@ vy_nm = Psi_sel^dag @ Vy @ Psi_sel
 ```
 
 where `Psi_sel` selects bands whose k=0 eigenvalues fall within the
-Kubo energy window (mulist range ± `transport_buffer`, default = mulist
-width).  For SCBA, a tighter window (mulist ± 5×Γ₀) selects the
+Kubo energy window (mulist range ± `transport_buffer`, default =
+max(mulist width, 500 meV)).  The buffer must be large enough to include
+remote bands whose Berry curvature contributions (decaying as 1/D²) are
+non-negligible; 500 meV is sufficient for typical BLG parameters.  For SCBA, a tighter window (mulist ± 5×Γ₀) selects the
 eigenvalue-collection bands.  The eigenvalues are histogrammed into a
 crude DOS (`dos_K`, `dos_Kp`) on the mulist energy grid (same binning as
 `calctype = 'dos'`) at no extra cost, since the diagonalization is

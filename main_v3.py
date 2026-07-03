@@ -632,7 +632,7 @@ def do_calc(filepath):
         if transport_buffer_meV is not None:
             kubo_buffer = float(transport_buffer_meV)
         else:
-            kubo_buffer = mu_range
+            kubo_buffer = max(mu_range, 500.0)
         kubo_lo = mu_min - kubo_buffer
         kubo_hi = mu_max + kubo_buffer
         scba_buffer = 5.0 * float(Gamma_list_meV[0])

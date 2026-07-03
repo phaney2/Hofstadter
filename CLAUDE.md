@@ -212,6 +212,20 @@ old values and fix every occurrence. A past failure to do this caused
 `Nq = 2*qq` to persist across four doc files when the code actually uses
 `Nq = qq`.
 
+## Transport: band selection buffer
+
+The `transport_buffer` parameter controls how many bands beyond the
+`mulist` range are included in the velocity matrix element sum.  The
+Berry curvature kernel `K_n = Σ_{m≠n} Im[vx·vy*] / D_nm²` decays as
+1/D² with inter-band spacing, so remote bands contribute non-negligibly.
+With too few bands, σ_xy plateaus are not quantized to integers.
+
+The default is `max(mulist_range, 500)` meV on each side.  The 500 meV
+floor ensures enough remote bands are included for the Chern number sum
+to converge (tested to ~10⁻⁶ accuracy for BLG LLs).  The user can
+override via the `transport_buffer` input parameter, but setting it
+below ~500 meV will degrade σ_xy quantization.
+
 ## What not to do
 
 - Don't add type hints, docstring expansions, or comments that restate

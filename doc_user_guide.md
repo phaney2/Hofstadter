@@ -95,7 +95,7 @@ variables (e.g., `elist` can use `nebin`).
 | `outputfile` | string | `bands_p{pp}_q{qq}.npz` | Output filename; use `.mat` extension for MATLAB format |
 | `mulist` | array (meV) | `linspace(-50,50,200)` | Chemical potential grid (transport mode only) |
 | `Gamma` | float or array (meV) | `1.0` | Broadening parameter (transport mode only). Scalar or list of values. In constant mode: Lorentzian half-width(s); when a list is given, transport coefficients are computed for each Γ value at negligible extra cost (the expensive diagonalization runs once). In SCBA mode: disorder strength Γ₀ (must be scalar). |
-| `transport_buffer` | float (meV) | mulist range | Energy buffer beyond mulist range for Kubo band selection. Default: full mulist width on each side. |
+| `transport_buffer` | float (meV) | max(mulist range, 500) | Energy buffer beyond mulist range for Kubo band selection. Must be large enough to include remote bands that contribute to the Berry curvature sum. Default: max of mulist width and 500 meV. |
 | `kT` | float (meV) | `0.0` | Thermal energy for Fermi-Dirac occupation (transport mode only). 0 = zero temperature (step function). |
 | `mu_ref` | float (meV) | (none) | Reference chemical potential for sigma_xy (transport mode only). When set, sigma_xy is computed relative to this value: sigma_xy(mu_ref) = 0. Place in a spectral gap to get integer-quantized Hall conductivity in neighboring gaps. |
 | `broadening` | string | `'constant'` | Broadening model: `'constant'` = fixed Lorentzian width, `'scba'` = self-consistent Born approximation (energy-dependent Γ(E)). |
