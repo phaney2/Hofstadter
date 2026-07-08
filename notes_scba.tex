@@ -164,28 +164,29 @@ The moire superlattice has a ``primary'' unit cell area
 \begin{equation}
   A_{\mathrm{prim}} = \frac{\sqrt{3}}{2}\, L_{\mathrm{moire}}^2,
 \end{equation}
-and the code uses a \emph{doubled} real-space unit cell:
-\begin{equation}
-  A_{\mathrm{uc}} = 2\, A_{\mathrm{prim}} = \sqrt{3}\, L_{\mathrm{moire}}^2.
-\end{equation}
-The magnetic flux per doubled unit cell is
-$\Phi/\Phi_0 = qq/pp$, and the magnetic field is
-$B = (qq/pp)\,\Phi_0 / A_{\mathrm{uc}}$.
+and the magnetic flux per primitive cell is
+$\Phi/\Phi_0 = qq/(2\,pp)$, i.e.
+$B = \bigl(qq/(2\,pp)\bigr)\,\Phi_0 / A_{\mathrm{prim}}$.
+(The input fraction $qq/pp$ is the flux through the
+centered-rectangular two-lattice-point cell of area
+$2\,A_{\mathrm{prim}}$ used internally by the Landau-gauge
+construction.)
 
-The magnetic Brillouin zone (MBZ) is $1/pp$ the area of the moire BZ.
-Due to the doubled real-space cell, the moire BZ is itself half the
-``primary'' moire BZ.  Therefore the MBZ covers a fraction $1/(2\,pp)$
-of the primary moire BZ.
+The magnetic unit cell --- the region whose states appear exactly once
+in the spectrum at each $\mathbf{k}$-point --- contains $2\,pp$
+primitive cells (area $A_{\mathrm{mag}} = 2\,pp\,A_{\mathrm{prim}}$),
+enclosing $qq$ flux quanta, matching the $qq$ guiding centers per
+Landau level in the basis.
 
 Eigenvalues are computed on a uniform $\mathbf{k}$-mesh of $\Nk$
-points covering the MBZ.  The \emph{physical} DOS per primary unit
-cell requires dividing the eigenvalue sum by the number of primary
-unit cells represented:
+points.  The \emph{physical} DOS per primitive unit cell requires
+dividing the eigenvalue sum by the number of primitive unit cells
+represented:
 \begin{equation}\label{eq:Nbz}
   N_\BZ = \Nk \times 2\,pp.
 \end{equation}
-The factor $2\,pp$ accounts for $pp$-fold BZ folding and the factor of
-2 from the doubled cell.
+The factor $2\,pp$ is the number of primitive cells per magnetic unit
+cell (one magnetic cell of states per $\mathbf{k}$-point).
 
 \subsection{SCBA solver: \texttt{\_solve\_scba()}}
 
@@ -274,19 +275,20 @@ $\Gam(\eps)$, and multiplies the result by $\Gam(\eps)^2$:
 
 \paragraph{Prefactor.}  The caller applies:
 \begin{equation}
-  \sigma_{xx} = \frac{4\,pp\,\hbar^2}{A_m\,\Nk}
+  \sigma_{xx} = \frac{2\,\hbar^2}{A_{\mathrm{mag}}\,\Nk}
   \times \sum_\mathbf{k} \Phi_{xx}(\mu) \quad
   [\text{units of } e^2/h],
 \end{equation}
-where $A_m = pp^2\, A_{\mathrm{uc}} / (2\,qq)$ is the magnetic unit
-cell area in~$\Ang^2$, and the factor of 4 absorbs the spin
-degeneracy times the $\pi$ factors from the spectral functions
-($4 = 2_{\mathrm{spin}} \times 2/\pi \times \pi$; see derivation
-below).  In SCBA mode the $\Gam^2$ is already inside $\Phi_{xx}$, so
-\texttt{pf\_xx} omits it (line~812):
+where $A_{\mathrm{mag}} = 2\,pp\,A_{\mathrm{prim}}$ is the magnetic
+unit cell area in~$\Ang^2$ (one magnetic cell of states per
+$\mathbf{k}$-point; no $qq$ appears in the normalization).  The
+output is per spin and per valley, matching the $\sigma_{xy}$
+convention; the factor of 2 comes from the $\pi$ factors in the
+spectral functions (see derivation below).  In SCBA mode the $\Gam^2$
+is already inside $\Phi_{xx}$, so \texttt{pf\_xx} omits it:
 \begin{verbatim}
-  pf_xx = 4.0 * pp * HBAR_EV**2 / (A_m_Ang2 * Nk_tot)   # SCBA
-  pf_xx = 4.0 * pp * HBAR_EV**2 * G2 / (A_m_Ang2 * Nk_tot)  # constant
+  pf_xx = 2.0 * HBAR_EV**2 / (A_mag_Ang2 * Nk_tot)   # SCBA
+  pf_xx = 2.0 * HBAR_EV**2 * G2 / (A_mag_Ang2 * Nk_tot)  # constant
 \end{verbatim}
 
 \paragraph{Prefactor derivation.}  Starting from Eq.~\eqref{eq:sxx_spectral}
@@ -303,11 +305,13 @@ To express in units of $e^2/h$, divide by $e^2/h = e^2/(2\pi\hbar)$:
   \frac{\sigma_{xx}}{e^2/h}
   = \frac{2\hbar^2}{\Omega}\, \Gam^2\, \sum_{nm} |v^x_{nm}|^2\, L_n\, L_m.
 \end{equation}
-Including spin degeneracy ($\times 2$) and the BZ average
-($\Omega \to A_m / pp$, with $1/\Nk$ sum over BZ):
+Including the k-mesh average
+($\Omega \to A_{\mathrm{mag}}$, the area whose states appear once per
+$\mathbf{k}$-point, with the $1/\Nk$ sum over the mesh), and keeping
+the result per spin and per valley (no spin degeneracy factor):
 \begin{equation}
   \frac{\sigma_{xx}}{e^2/h}
-  = \frac{4\, pp\, \hbar^2}{A_m\,\Nk}\, \Gam^2\,
+  = \frac{2\, \hbar^2}{A_{\mathrm{mag}}\,\Nk}\, \Gam^2\,
   \sum_{\mathbf{k},n,m} |v^x_{nm}|^2\, L_n\, L_m.
 \end{equation}
 In SCBA mode, $\Gam^2$ is absorbed into the per-$\eps$ sum (it varies

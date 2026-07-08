@@ -4,11 +4,14 @@ This project computes moire band structures for mono- or bilayer graphene
 on hBN.  Four calculation modes:
 
 1. **Hofstadter** (`main_v3.py`): Magnetic Bloch bands in a Landau-level
-   basis at rational flux qq/pp.  Uses corrected moire coupling matrices
-   (order=[3,1,2], conj=1, psi_conj=1) and doubled real-space unit cell
-   (Nq=qq).  Supports `calctype = 'ek'` (band structure), `'dos'`
-   (density of states), and `'transport'` (Kubo-formula linear response
-   transport coefficients: sigma_xx, sigma_xy, L12_xx, L12_xy vs mu).
+   basis.  The physical flux per **primitive** moire cell is qq/(2*pp);
+   the input fraction qq/pp is the flux through the centered-rectangular
+   (two-lattice-point) construction cell required by the Landau gauge.
+   Uses corrected moire coupling matrices (order=[3,1,2], conj=1,
+   psi_conj=1) with Nq=qq.  Supports `calctype = 'ek'` (band structure),
+   `'dos'` (density of states), and `'transport'` (Kubo-formula linear
+   response transport coefficients: sigma_xx, sigma_xy, L12_xx, L12_xy
+   vs mu).
    Supports constant broadening or SCBA (self-consistent Born
    approximation) for energy-dependent broadening that captures
    localization-induced σ_xx suppression in narrow subbands.
@@ -26,7 +29,7 @@ on hBN.  Four calculation modes:
 
 | File | Purpose |
 |---|---|
-| `main_v3.py` | **Primary** Hofstadter engine: corrected moire coupling, doubled unit cell (Nq=qq) |
+| `main_v3.py` | **Primary** Hofstadter engine: corrected moire coupling, minimal k-zone, physical normalization (Nq=qq) |
 | `main_v2.py` | Legacy Hofstadter engine (Nq=qq, old T-matrix conventions) |
 | `hofstadter_testing.py` | Convention explorer: sweep order/conj/psi flags to find correct T matrices |
 | `hamiltonian.py` | All Hamiltonian construction (intralayer, intermonolayer, interbilayer, testing variants) |
@@ -36,6 +39,7 @@ on hBN.  Four calculation modes:
 | `constants.py` | Physical constants (shared) |
 | `zerofield.py` | Zero-field engine: moire geometry, plane-wave Hamiltonian, k-path solver |
 | `validate.py` | Hofstadter benchmark against MATLAB `.mat` data (uses legacy conventions) |
+| `validate_transport_norm.py` | main_v3 normalization + minimal-zone validation (zone equivalence, same-B invariance, state counting) |
 | `validate_zerofield.py` | Zero-field benchmark comparison against `bands_BG.mat` |
 | `plot_zerofield.m` | MATLAB plotting script for zero-field band structure |
 | `input_test.txt` | Default Hofstadter input (pp=1, qq=1) |
@@ -80,6 +84,16 @@ than re-parsing the source.
   is a dict whose keys depend on `calctype`. New calctypes add new key sets.
 - **Hofstadter units**: Input parameters are in meV; converted to Joules
   internally. Final eigenvalues are converted back to meV.
+- **Hofstadter normalization**: Every k-point's spectrum contains one
+  magnetic unit cell (= 2*pp primitive moire cells) of states.  All
+  k-integrated outputs are normalized accordingly: DOS histograms use
+  weight `1/(Nk*2*pp)` (states per primitive cell), and the transport
+  prefactors use `1/(Nk * A_mag)` with `A_mag = 2*pp*A_uc`.  No qq
+  appears in any normalization.  The k-mesh samples the minimal zone
+  `[b1/pp, gcd(2*pp,qq)*b2/pp]`, on which all gauge-invariant
+  quantities are exactly periodic.  Validated by
+  `validate_transport_norm.py` — run it after touching the k-mesh,
+  DOS binning, or transport prefactors.
 - **Zero-field units**: Input parameters are in meV; converted to eV
   internally. Eigenvalues are output in eV.
 - **Semiclassical units**: Input in meV; internal calculation in eV;
@@ -126,6 +140,11 @@ For main_v3 validation, compare against `hofstadter_testing.py` with
 order=[3,1,2], conj=1, psi_conj=1, sxflag=0, dagger=0 — the spectra
 should match to machine precision (~1e-11 meV).
 
+For DOS/transport normalization and k-zone changes, run
+`python validate_transport_norm.py` — checks minimal-zone vs full-zone
+equivalence (machine precision), same-B invariance ((pp,qq) vs
+(2pp,2qq)), and exact state counting.  All tests must PASS.
+
 ### Zero-field
 
 1. Run `python validate_zerofield.py` — compares against
@@ -137,8 +156,10 @@ should match to machine precision (~1e-11 meV).
 
 ### Hofstadter
 The default `input_test.txt` uses `pp=1, qq=1` (strong field, small
-matrices).  main_v3 uses Nq=qq (same chain size as main_v2) but with a
-doubled real-space unit cell and corrected T-matrix conventions.
+matrices).  main_v3 uses Nq=qq (same chain size as main_v2) with
+corrected T-matrix conventions; it samples the minimal k-zone
+`[b1/pp, gcd(2*pp,qq)*b2/pp]` by default (`full_zone = 1` restores the
+qq-extended zone).
 
 ### Zero-field
 The default `input_zerofield.txt` uses `NQ=7` (49 Q-vectors, dim=196 for

@@ -75,8 +75,9 @@ variables (e.g., `elist` can use `nebin`).
 | `theta` | float (deg) | `0.0` | Twist angle between graphene and hBN |
 | `eta` | float | `2` | AA/AB ratio (legacy) |
 | `U` | array (meV) | `0*[1 1]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer |
-| `nk1` | int | `10` | k-mesh points along b1 |
-| `nk2` | int | `10` | k-mesh points along b2 |
+| `nk1` | int | `10` | k-mesh points along b1/pp |
+| `nk2` | int | `10` | k-mesh points along the second zone vector (`gcd(2*pp,qq)*b2/pp` by default) |
+| `full_zone` | int | `0` | 1 = sample the full qq-extended zone `[b1/pp, qq*b2/pp]` instead of the minimal zone. Identical k-averages at higher cost; for regression tests. |
 | `LL_multiplier` | int | `6` | Controls Landau level cutoff N |
 | `Nmax` | int | `1000` | Hard cap on number of Landau levels |
 | `isparallel` | int | `1` | 0 = serial, 1 = parallel k-loop |
@@ -186,8 +187,8 @@ Bottom-layer weight is `1 - weights_K`.
 | Key | Shape | Units | Description |
 |---|---|---|---|
 | `elist` | (nebin,) | meV | Energy grid |
-| `dos_K` | (nebin,) | counts | States per bin, K valley |
-| `dos_Kp` | (nebin,) | counts | States per bin, K' valley |
+| `dos_K` | (nebin,) | states/cell | States per primitive moire cell per bin, K valley |
+| `dos_Kp` | (nebin,) | states/cell | States per primitive moire cell per bin, K' valley |
 
 With `layer_resolved = 1` (bilayer only), the output additionally includes:
 
@@ -200,13 +201,14 @@ With `layer_resolved = 1` (bilayer only), the output additionally includes:
 
 `dos_K_top + dos_K_bottom = dos_K` (exact to machine precision).
 
-**DOS normalization**: The DOS arrays are normalized so that each
-eigenvalue contributes `1/Nk_tot` to its bin (i.e., the sum over all bins
-and bands equals the number of bands). To convert to a physical density
-of states per unit area, multiply by `1 / (A_uc * pp)`, where `A_uc` is
-the moire unit cell area and `pp` is the flux denominator. This accounts
-for the magnetic zone folding that maps the moire BZ onto the physical
-magnetic BZ.
+**DOS normalization**: The DOS arrays are physically normalized: each
+eigenvalue contributes `1/(Nk_tot * 2*pp)` to its bin — one state per
+magnetic unit cell (`2*pp` primitive moire cells) per k-point.  The
+output is in states per primitive moire cell per bin; the integrated
+DOS equals the LL degeneracy `qq/(2*pp)` states per cell per Landau
+level.  Divide by the primitive cell area `A_uc = sqrt(3)/2 * L_moire^2`
+for states per unit area.  No further pp- or qq-dependent rescaling is
+needed.
 
 #### `calctype = 'transport'`
 
@@ -214,8 +216,8 @@ magnetic BZ.
 |---|---|---|---|
 | `mulist` | (n_mu,) | meV | Chemical potential grid |
 | `Gamma_list` | (n_gamma,) | meV | Gamma values used (only present when Gamma is a list with n_gamma > 1) |
-| `dos_K` | (n_mu,) | counts | Crude histogram DOS (states per bin), K valley |
-| `dos_Kp` | (n_mu,) | counts | Crude histogram DOS (states per bin), K' valley |
+| `dos_K` | (n_mu,) | states/cell | Crude histogram DOS (states per primitive moire cell per bin), K valley |
+| `dos_Kp` | (n_mu,) | states/cell | Crude histogram DOS (states per primitive moire cell per bin), K' valley |
 | `dos_broad_K` | (n_mu,) or (n_gamma, n_mu) | states/eV/cell | Lorentzian-broadened DOS, K valley |
 | `dos_broad_Kp` | (n_mu,) or (n_gamma, n_mu) | states/eV/cell | Lorentzian-broadened DOS, K' valley |
 | `sigma_xx_K` | (n_mu,) or (n_gamma, n_mu) | e²/h | Longitudinal conductivity, K valley |
@@ -239,16 +241,19 @@ Gamma-independent.  SCBA mode requires scalar Gamma (a list triggers a
 warning and only the first value is used as Γ₀).
 
 Two DOS outputs are included: `dos_K`/`dos_Kp` is a crude eigenvalue
-histogram (states per mulist bin, weight 1/Nk per eigenvalue), and
-`dos_broad_K`/`dos_broad_Kp` is a Lorentzian-broadened DOS on the mulist
-grid in units of states/eV/cell.  The broadened DOS uses constant Γ₀
+histogram (states per primitive moire cell per mulist bin, weight
+`1/(Nk * 2*pp)` per eigenvalue), and `dos_broad_K`/`dos_broad_Kp` is a
+Lorentzian-broadened DOS on the mulist grid in units of
+states/eV/cell.  The broadened DOS uses constant Γ₀
 (CBA) or the SCBA Γ(E) evaluated at each probe energy, with
 normalization `1/(π Nk 2pp)` consistent with the SCBA self-consistency
 equation.
 
 Uses the standard interband Kubo formula for sigma_xy (broadened Berry
 curvature) and Kubo-Greenwood formula for sigma_xx (two spectral
-functions).
+functions).  All transport coefficients are per spin and per valley
+(multiply by 2 for spin degeneracy; sum the K and K' outputs for the
+total).
 
 With `broadening = 'scba'`, the longitudinal conductivity (sigma_xx,
 L12_xx) uses an energy-dependent broadening Γ(E) determined by the
@@ -528,11 +533,14 @@ The magnetic field B is not set directly.  It is determined by `pp`, `qq`,
 and the moire lattice:
 
 ```
-B = (qq/pp) * Phi_0 / A_moire
+B = (qq/(2*pp)) * Phi_0 / A_uc
 ```
 
-where `Phi_0 = h/e` is the flux quantum and `A_moire` is the moire unit
-cell area.  Larger `pp` means smaller B.
+where `Phi_0 = h/e` is the flux quantum and `A_uc = sqrt(3)/2 * L_moire^2`
+is the **primitive** moire unit cell area.  The flux per primitive moire
+cell is `qq/(2*pp)` flux quanta; the input fraction `qq/pp` is the flux
+through the centered-rectangular (two-lattice-point) construction cell
+used by the Landau-gauge basis.  Larger `pp` means smaller B.
 
 ---
 

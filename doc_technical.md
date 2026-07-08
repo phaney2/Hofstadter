@@ -21,9 +21,19 @@ Quantum Matter."
 
 The system is a graphene sheet (monolayer or Bernal-stacked bilayer) on an
 hBN substrate.  The lattice mismatch between graphene (a = 2.46 A) and hBN
-(a = 2.504 A) produces a moire superlattice with period `L_moire`.  A
-perpendicular magnetic field B is applied such that the flux through one
-moire unit cell is the rational fraction `Phi/Phi_0 = qq/pp`.
+(a = 2.504 A) produces a moire superlattice with period `L_moire` and
+primitive (triangular-lattice) unit cell area `A_uc = sqrt(3)/2 * L_moire^2`.
+A perpendicular magnetic field B is applied such that the flux through one
+**primitive** moire unit cell is `Phi/Phi_0 = qq/(2*pp)`.
+
+The factor of 2 is a construction convention, not physics: the
+Landau-gauge guiding-center chain requires a rectangular cell with
+orthogonal translations, and the smallest rectangular unit cell of a
+triangular lattice is the centered rectangle (two lattice points, area
+`2*A_uc`).  The input parameters `qq/pp` specify the flux through that
+centered-rectangular construction cell.  All physical statements and
+output normalizations reference the primitive cell `A_uc` and the flux
+`qq/(2*pp)`.
 
 The number of graphene layers is controlled by the input parameter `nlayers`
 (default 2).
@@ -100,7 +110,7 @@ Code is split across six modules:
 | `numerics.py` | Mathematical routines: Laguerre polynomials, F_nm matrix elements |
 | `basis.py` | Label-based basis toolkit: outer product and index lookup |
 | `hamiltonian.py` | All Hamiltonian construction (intralayer, intermonolayer, interbilayer, testing variants) |
-| `main_v3.py` | Production engine with doubled unit cell and corrected moire coupling (Nq=qq) |
+| `main_v3.py` | Production engine with corrected moire coupling (Nq=qq; centered-rectangular construction cell) |
 | `main_v2.py` | Legacy engine (single chain, old moire coupling conventions) |
 | `hofstadter_testing.py` | Butterfly sweep engine with configurable T-matrix conventions |
 
@@ -150,7 +160,7 @@ Code is split across six modules:
 | `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths.  Operates on pre-scaled data (already multiplied by `1000/Q_E`) so no per-k-point unit conversion is needed.  Uses `eigvalsh(overwrite_a=True, check_finite=False)` to avoid internal copies. |
 | `_init_kpoint_worker(shared)` | Pool initializer: stores shared matrices in module-global `_worker_shared` so they are pickled once per worker, not per task. |
 | `_solve_kpoint(args)` | Pool worker entry point.  Unpacks `(kc, kpt)`, calls `_solve_kpoint_core`, returns `(kc, tek_K, tek_Kp)`. |
-| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer or bilayer depending on `nlayers`) using `Nq = qq` with doubled unit cell, pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel), post-processes into `ek` or `dos` output. |
+| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer or bilayer depending on `nlayers`) using `Nq = qq`, pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel) over the minimal zone, post-processes into `ek`, `dos`, or `transport` output. |
 | `main(input_file)` | CLI wrapper: calls `do_calc`, saves result to `.npz` or `.mat`. |
 
 Differences from `main_v2.py` (legacy):
@@ -158,7 +168,7 @@ Differences from `main_v2.py` (legacy):
 | Feature | main_v2 | main_v3 |
 |---|---|---|
 | Chain size | `Nq = qq` | `Nq = qq` |
-| BZ vectors | `[b1/pp, b2*qq/pp]` | `[b1/pp, b2*qq/pp]` |
+| k-zone vectors | `[b1/pp, b2*qq/pp]` | `[b1/pp, b2*gcd(2pp,qq)/pp]` (minimal; `full_zone=1` for qq-extended) |
 | T matrices | Old conventions | Corrected (order=[3,1,2], conj=1, psiconj=1) |
 | BLAS threads | `OPENBLAS_NUM_THREADS=1` | `OPENBLAS_NUM_THREADS=1` |
 | U identity | `np.eye(dim1)` | `np.eye(Hintra.shape[0])` (post-chop) |
@@ -229,18 +239,46 @@ N is determined automatically:
 
 ## 5. k-point mesh
 
-The magnetic Brillouin zone (BZ) is `1/pp` the size of the moire BZ.
-Reciprocal lattice vectors:
+Moire reciprocal lattice vectors:
 
 ```
 b1 = ktheta * [0, -1]
 b2 = ktheta * [sqrt(3)/2, 1/2]
 ```
 
-Both `main_v3.py` and `main_v2.py` use magnetic BZ vectors `b1/pp` and
-`b2*qq/pp`.  The k-mesh is a uniform `nk1 x nk2` grid over this BZ,
-flattened in column-major (Fortran) order to match MATLAB conventions.
-Each k-point is shifted by `-M_mag` before entering the Hamiltonian.
+The k label of the guiding-center chain construction is **not** the
+physical magnetic Bloch momentum: its natural periodicity is set by the
+guiding-center lattice (spacing `2*pp*Lx/qq`, fixed by the flux
+density), not by the crystal.  The Hamiltonian matrix family H(k) is
+literally periodic under `b1/pp` and `qq*b2/pp`.  Gauge-equivalence
+(guiding-center permutations and rephasings, which commute with H_base
+and the velocity operators) reduces the b2 period further: **all
+gauge-invariant quantities (spectrum, Berry curvature kernel, |v|^2)
+are periodic under `b1/pp` and `qfac*b2/pp` with**
+
+```
+qfac = gcd(2*pp, qq)
+```
+
+(verified to machine precision for monolayer and bilayer, both valleys,
+coprime and non-coprime pp,qq — see `validate_transport_norm.py`).
+
+`main_v3.py` therefore samples the minimal zone `[b1/pp, qfac*b2/pp]`
+by default.  Set the input parameter `full_zone = 1` to sample the full
+qq-extended zone `[b1/pp, qq*b2/pp]` (identical k-averages at `qq/qfac`
+times the cost; useful for regression tests).  `main_v2.py` (legacy)
+always uses the qq-extended zone.
+
+The k-mesh is a uniform `nk1 x nk2` grid over this zone, flattened in
+column-major (Fortran) order to match MATLAB conventions.  Each k-point
+is shifted by `-M_mag` before entering the Hamiltonian.
+
+Note that mesh points related by `b2/pp` (when `qfac > 1`) correspond to
+*different* physical magnetic momenta: the map from the chain label k to
+the physical magnetic Bloch momentum is folded.  The sampled zone covers
+the physical magnetic BZ uniformly in measure, which is why per-k-point
+state counting (Section 14) gives the correct normalization for all
+k-integrated quantities.
 
 ---
 
@@ -345,10 +383,17 @@ result = {
     'calctype': 'dos',
     'params':  dict,                # all input file parameters
     'elist':   ndarray (nebin,),    # energy grid in meV
-    'dos_K':   ndarray (nebin,),    # state count per bin, K valley
-    'dos_Kp':  ndarray (nebin,),    # state count per bin, K' valley
+    'dos_K':   ndarray (nebin,),    # states per primitive moire cell per bin, K valley
+    'dos_Kp':  ndarray (nebin,),    # states per primitive moire cell per bin, K' valley
 }
 ```
+
+Each eigenvalue contributes `1/(Nk_tot * 2*pp)` to its bin: one state
+per magnetic unit cell (`2*pp` primitive moire cells) per k-point.  The
+histogram is therefore already physically normalized — the integrated
+DOS equals `nlayers*(2N+1)*qq/(2*pp)` states per primitive cell, i.e.,
+the LL degeneracy `B*A_uc/Phi_0 = qq/(2*pp)` per cell per Landau level.
+Divide by `A_uc` for states per unit area.
 
 The legacy MATLAB value `calctype = 'spectrum'` is mapped to `'dos'`.
 
@@ -401,7 +446,7 @@ w          = exp(-i*2pi/3)    (sublattice phase rotation)
 
 | File | Role |
 |---|---|
-| `main_v3.py` | Production Hofstadter engine (doubled unit cell, Nq=qq, corrected coupling) |
+| `main_v3.py` | Production Hofstadter engine (Nq=qq, corrected coupling, minimal k-zone) |
 | `main_v2.py` | Legacy Hofstadter engine (single chain, old coupling conventions) |
 | `hofstadter_testing.py` | Butterfly sweep engine with configurable T-matrix conventions |
 | `hamiltonian.py` | Hamiltonian construction (intralayer, intermonolayer, interbilayer, testing variants) |
@@ -416,6 +461,7 @@ w          = exp(-i*2pi/3)    (sublattice phase rotation)
 | `input_testing_BG.txt` | Testing input (bilayer, convention exploration) |
 | `input_zerofield.txt` | Example zero-field input |
 | `validate.py` | Legacy Hofstadter benchmark comparison (main_v2) |
+| `validate_transport_norm.py` | Transport/DOS normalization + minimal-zone validation (main_v3) |
 | `validate_testing_BG.py` | Bilayer testing benchmark comparison against MATLAB |
 | `validate_zerofield.py` | Zero-field benchmark comparison |
 | `plot_zerofield.m` | MATLAB plotting script for zero-field bands |
@@ -583,28 +629,50 @@ At kT=0, `(-df/deps) = delta(eps-mu)`, so `sigma = Phi(mu)` and
 `L12 = 0`.  Fast paths are used in this limit: `L @ vx_sq @ L` for
 sigma_xx, `sum K_n[E_n < mu]` for sigma_xy.
 
-### Prefactor derivation
+### Normalization (state counting)
 
-The prefactor for sigma_xy is derived from the Kubo formula and the
-relation between the magnetic BZ integral and the k-mesh sum:
+At each k-point the numerical spectrum contains exactly one magnetic
+unit cell's worth of states.  The magnetic cell is `2*pp` primitive
+moire cells (area `A_mag = 2*pp*A_uc`): the flux per primitive cell is
+`qq/(2*pp)`, so the magnetic cell encloses `qq` flux quanta, matching
+the `qq` guiding centers per Landau level in the basis.  Consistency
+check: `nlayers*(2N+1)` LLs x `qq` guiding centers per k-point,
+divided by `2*pp*A_uc`, equals the physical LL density
+`nlayers*(2N+1) * B/Phi_0` exactly.
+
+Every k-integrated physical quantity is therefore normalized by
+`1/(Nk * A_mag)` — one magnetic cell of states per mesh point.  No qq
+appears in the measure; qq enters only through the physics (B, number
+of subbands).  For the Hall conductivity:
 
 ```
-sigma_xy / (e^2/h) = pp * sum_n f_n * C_n
-C_n = (1/2pi) * (A_MBZ / Nk) * sum_k Omega_n(k)
-    = (2*pi / (A_m_Ang2 * Nk)) * sum_k Omega_n(k)
+sigma_xy / (e^2/h) = -4*pi*hbar_eV^2 / (A_mag_Ang2 * Nk) * sum_{k,n occ} K_n
+K_n = sum_{m!=n} Im[vx_nm * conj(vy_nm)] / (D_nm^2 + G^2)
 ```
 
-using `A_MBZ = (2*pi)^2 / A_m_Ang2` (via 1e-20 m^2/Ang^2 conversion).
+which in the Gamma -> 0 limit reduces to the TKNN sum of occupied-band
+Chern numbers.  sigma_xx carries the same `1/(A_mag_Ang2 * Nk)`
+normalization (`pf_xx = 2*hbar_eV^2*G^2/(A_mag_Ang2*Nk)` in constant
+mode).  **All transport outputs are per spin and per valley** — no
+spin degeneracy factor is included.  The same counting gives the DOS
+normalization `1/(Nk * 2*pp)` in states per primitive moire cell (used
+by the histogram DOS, the broadened DOS, and the SCBA
+self-consistency).
 
-### BZ folding factor
+This normalization is validated by `validate_transport_norm.py`:
+(pp,qq) and (2*pp,2*qq) describe the identical physical system and must
+(and do) give equal DOS and sigma_xy plateau values; sigma_xy gap
+plateaus are integer Chern numbers across the Hofstadter butterfly.
 
-The magnetic BZ is 1/pp of the full moire BZ.  The k-sum covers only
-the magnetic BZ, so the physical conductivity is pp times the BZ-averaged
-value.  This factor of pp is included in the prefactor.
+Historical note: an earlier version used
+`pf ~ pp/(A_m * Nk)` with `A_m = pp^2*uc_area/(2*qq)`, motivated by an
+incorrect "the k-zone is the magnetic BZ, folded 1/pp" argument.  That
+prefactor is `2*qq` times too large (the sampled zone is not the
+physical magnetic BZ; see Section 5).
 
 ### Units
 
-- A_m: magnetic unit cell area = pp^2 * uc_area / (2*qq), in Ang^2
+- A_mag: magnetic unit cell area = 2 * pp * A_uc, in Ang^2
 - Eigenvalues from k-loop: meV, converted to eV for the formulas
 - Output sigma: dimensionless (units of e^2/h)
 - Output L12: units of e^2/h * eV
@@ -676,9 +744,9 @@ Gamma(E) = pi * Gamma_0^2 * rho(E)
 rho(E) = (1 / (Nk * 2*pp)) * sum_{n,k} (1/pi) * Gamma(E) / [(E - E_nk)^2 + Gamma(E)^2]
 ```
 
-where rho(E) is the physical DOS per primary moire unit cell.  The
-factor 2*pp accounts for the magnetic BZ being 1/(2*pp) of the
-moire BZ (pp for zone folding, 2 for the doubled real-space cell).
+where rho(E) is the physical DOS per primitive moire unit cell.  The
+factor 2*pp is the number of primitive cells in the magnetic unit cell
+(one magnetic cell of states per k-point; see "Normalization" above).
 The sum runs over all k-points and bands in the eigenvalue pass.
 Gamma depends on the probe energy E (same for all eigenstates at a given
 energy), not on the eigenstate energy E_nk.

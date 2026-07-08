@@ -1,8 +1,10 @@
 """
 Magnetic Bloch bands for mono/bilayer graphene on hBN substrate.
 
-Uses half-chain (Nq = qq) with doubled unit cell, and corrected moire
-coupling matrices (order=[3,1,2], conj=1, psiconj=1).
+Uses a qq-site guiding-center chain (Nq = qq) built on the
+centered-rectangular cell of the moire lattice (flux qq/(2*pp) per
+primitive moire cell), with corrected moire coupling matrices
+(order=[3,1,2], conj=1, psiconj=1).
 
 Reference: "A Quantum Ruler for Orbital Magnetism in Moire Quantum Matter"
 """
@@ -24,6 +26,9 @@ from hamiltonian import (get_interbilayerterms_K, get_interbilayerterms_Kp,
                          get_berry_connection_K, get_berry_connection_Kp)
 
 HBAR_EV = 6.582119569e-16  # eV*s
+
+# np.trapezoid is the numpy>=2 name for np.trapz
+_trapz = getattr(np, 'trapezoid', np.trapz)
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +112,7 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     """Compute per-k-point contribution to transport sums.
 
     Returns (sxx, sxy, l12xx, l12xy) each shape (n_gamma, n_mu).
-    Prefactors (pp, area, 1/Nk) are applied in the caller.
+    Prefactors (magnetic cell area, 1/Nk) are applied in the caller.
 
     In SCBA mode (d['scba_Gamma_E'] is not None), sxx and l12xx include
     the Gamma(eps)^2 factor from the normalized spectral functions, so
@@ -186,11 +191,11 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
                 x_eps_clip = np.clip(x_eps, -500, 500)
                 f_eps = 1.0 / (np.exp(x_eps_clip) + 1.0)
                 neg_dfde = (1.0 / kT) * f_eps * (1.0 - f_eps)
-                sxx[ig, i_mu] = np.trapezoid(neg_dfde * Phi_xx, eps_grid)
-                sxy[ig, i_mu] = np.trapezoid(neg_dfde * Phi_xy, eps_grid)
-                l12xx[ig, i_mu] = np.trapezoid(
+                sxx[ig, i_mu] = _trapz(neg_dfde * Phi_xx, eps_grid)
+                sxy[ig, i_mu] = _trapz(neg_dfde * Phi_xy, eps_grid)
+                l12xx[ig, i_mu] = _trapz(
                     (eps_grid - mu) * neg_dfde * Phi_xx, eps_grid)
-                l12xy[ig, i_mu] = np.trapezoid(
+                l12xy[ig, i_mu] = _trapz(
                     (eps_grid - mu) * neg_dfde * Phi_xy, eps_grid)
             else:
                 if use_scba:
@@ -470,10 +475,15 @@ def do_calc(filepath):
     L_moire = (1 + eps) * A_GRAPHENE / np.sqrt(eps ** 2 + 2 * (1 + eps) * (1 - np.cos(theta)))
 
     ktheta = 4 * np.pi / (3 ** 0.5 * L_moire)
-    uc_area = 3 ** 0.5 * L_moire ** 2 / 2 * 2
+    # Primitive moire unit cell area.  The magnetic flux per primitive
+    # cell is qq/(2*pp) flux quanta; the factor 2 arises because the
+    # Landau-gauge construction is built on the centered-rectangular
+    # (two-lattice-point) cell of the triangular moire lattice, which
+    # carries flux qq/pp.
+    A_uc = 3 ** 0.5 * L_moire ** 2 / 2
 
     phi_0 = HBAR * 2 * np.pi / Q_E
-    B = (qq / pp) * phi_0 / uc_area
+    B = (qq / (2 * pp)) * phi_0 / A_uc
     lB = (HBAR / (Q_E * B)) ** 0.5
 
     eneLL = g0 / 1e3 * Q_E * A_GRAPHENE / lB * 2 ** 0.5
@@ -575,7 +585,16 @@ def do_calc(filepath):
     n11 = n1grid.flatten(order='F')
     n22 = n2grid.flatten(order='F')
 
-    vb = np.array([b1 / pp, b2 * qq / pp])
+    # Minimal sampling zone: all gauge-invariant quantities (spectrum,
+    # Berry curvature kernel, |v|^2) are periodic under b1/pp and
+    # qfac*b2/pp with qfac = gcd(2*pp, qq).  Sampling the full
+    # qq-extended zone (full_zone = 1) gives identical k-averages at
+    # qq/qfac times the cost.
+    full_zone = int(d.get('full_zone', 0))
+    qfac = qq if full_zone else int(np.gcd(2 * pp, qq))
+    vb = np.array([b1 / pp, b2 * qfac / pp])
+    if qfac != qq:
+        print(f"  k-zone: [b1/pp, {qfac}*b2/pp] (minimal; full zone would be {qq}*b2/pp)")
 
     kpoints = np.zeros((Nk_tot, 2))
     for j in range(Nk_tot):
@@ -624,7 +643,11 @@ def do_calc(filepath):
         mu_ref_eV = float(mu_ref_meV) / 1000.0 if mu_ref_meV is not None else None
         J_to_eV = 1.0 / Q_E
         m_to_Ang = 1e10
-        A_m_Ang2 = (pp ** 2 * uc_area / (2 * qq)) * m_to_Ang ** 2
+        # Each k-point's spectrum holds exactly one magnetic unit cell's
+        # worth of states: 2*pp primitive moire cells (flux qq/(2*pp) per
+        # primitive cell -> qq flux quanta, i.e. qq guiding centers).
+        # All k-integrated quantities are normalized per this area.
+        A_mag_Ang2 = (2 * pp * A_uc) * m_to_Ang ** 2
 
         # --- Energy-based band selection via k=0 probe ---
         mu_min, mu_max = mulist_meV.min(), mulist_meV.max()
@@ -831,7 +854,10 @@ def do_calc(filepath):
         l12xx_Kp_acc = np.zeros((n_gamma, n_all)) if 'Kp' in valley else None
         l12xy_Kp_acc = np.zeros((n_gamma, n_all)) if 'Kp' in valley else None
 
-        dos_weight = 1.0 / Nk_tot
+        # Histogram DOS in states per primitive moire cell per bin:
+        # each eigenvalue is one state per magnetic cell (2*pp primitive
+        # cells) per k-point.
+        dos_weight = 1.0 / (Nk_tot * 2 * pp)
         dos_K = np.zeros(n_mu) if 'K' in valley else None
         dos_Kp = np.zeros(n_mu) if 'Kp' in valley else None
         nb_kubo = len(band_sel_kubo)
@@ -915,12 +941,16 @@ def do_calc(filepath):
                 dos_broad_Kp = dos_broad
 
         # --- Apply prefactors and mu_ref subtraction ---
-        pf_xy = -4.0 * np.pi * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk_tot)
+        # sigma/(e^2/h) = (kernel prefactor) * sum_k / (Nk * A_mag):
+        # the k-sum divided by Nk*A_mag is the physical per-area average
+        # (one magnetic cell of states per k-point).  No qq dependence.
+        # All outputs are per spin, per valley (no spin degeneracy factor).
+        pf_xy = -4.0 * np.pi * HBAR_EV ** 2 / (A_mag_Ang2 * Nk_tot)
         if use_scba:
-            pf_xx = 4.0 * pp * HBAR_EV ** 2 / (A_m_Ang2 * Nk_tot)
+            pf_xx = 2.0 * HBAR_EV ** 2 / (A_mag_Ang2 * Nk_tot)
         else:
             G2_list = Gamma_list_eV ** 2
-            pf_xx = 4.0 * pp * HBAR_EV ** 2 * G2_list / (A_m_Ang2 * Nk_tot)
+            pf_xx = 2.0 * HBAR_EV ** 2 * G2_list / (A_mag_Ang2 * Nk_tot)
 
         result = {'calctype': 'transport', 'params': inp,
                   'mulist': mulist_meV, 'broadening': broadening_mode}
@@ -1069,7 +1099,9 @@ def do_calc(filepath):
         return result
 
     # --- DOS: bin eigenvalues into energy histogram ---
-    dos_weight = 1.0 / Nk_tot
+    # Units: states per primitive moire cell per bin (each eigenvalue is
+    # one state per magnetic cell = 2*pp primitive cells, per k-point).
+    dos_weight = 1.0 / (Nk_tot * 2 * pp)
     dos_K = np.zeros(len(elist))
     dos_Kp = np.zeros(len(elist))
     if layer_resolved:
