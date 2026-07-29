@@ -244,6 +244,11 @@ reading bandstructure output), the code auto-unwraps the nested format.
 
 Where `nbands = len(bands)`, `Nk = nk1 * nk2`.
 
+Downstream stages read `nk1`, `nk2` and `vol_M` from the data rather than
+from the input file, so a band structure written with `unfold = 1`
+carries its doubled mesh through the pipeline automatically.  See
+[Magnetic BZ unfolding](#magnetic-bz-unfolding-unfold--1).
+
 ### Isoenergy output (present when `nE` is in input, or `calctype = isoenergy`)
 
 Per-band arrays are stored with suffix `_band{n}` where `n` is the 0-based
@@ -452,6 +457,7 @@ magnetic Bloch bands in a Landau level basis at rational flux qq/pp.
 | `moire_psi`      | 0.29  | Moire coupling phase psi (rad). |
 | `eta`            | —     | Moire coupling parameter (passed to Hamiltonian construction) |
 | `eta_kubo`       | meV   | Broadening for Berry curvature Kubo sum (default: 2) |
+| `unfold`         | —     | 1 = unfold the doubled magnetic BZ after the k-loop (default: 0).  See below. |
 
 Shared parameters (`nk1`, `nk2`, `bands`, `isparallel`, `outputfile`,
 `U`) work identically to zero-field mode.
@@ -488,6 +494,62 @@ outputfile = 'hofstadter_benchmark.mat'
 
 Same format as zero-field output: E_K, E_Kp, Oz_K, Oz_Kp, Lz_K, Lz_Kp,
 kpoints, vol_M.
+
+### Magnetic BZ unfolding (`unfold = 1`)
+
+For flux `qq/pp = 2/(odd)` the Landau gauge forces a rectangular
+construction cell on a triangular moire lattice, and the magnetic BZ
+produced by the k-loop is a factor of two too small along G1.  Every
+physical band then appears as **two folded subbands** that overlap in
+energy, never mix, and swap hi/lo ordering across lines of exact
+degeneracy.  Because the solver returns eigenvalues sorted by energy,
+each subband is a kinked composite of both branches rather than a smooth
+surface — orbit areas, and hence Onsager LL fans, come out wrong.
+
+Setting `unfold = 1` runs the detection and unfolding described in
+`doc_technical.md` immediately after the k-loop, before anything is
+saved.  Adjacent band pairs are tested for the two degeneracy-line
+families; a pair is unfolded only if **both valleys** qualify.  Detection
+is from the data, never from `qq/pp` alone, so the flag is safe to leave
+on for fluxes that are not folded (nothing is detected and the band
+structure is returned unchanged, with a warning).
+
+Effect on the output:
+
+| Key | Change |
+|---|---|
+| `E_K`, `E_Kp`, `Oz_*`, `Lz_*` | one unfolded band per detected pair, shape `(npairs, 2*nk1*nk2)` |
+| `kpoints`  | `(2*nk1*nk2, 2)`, tiled once along G1 |
+| `nk1`      | doubled |
+| `nk2`      | unchanged |
+| `vol_M`    | halved |
+
+The original arrays are always kept alongside, under `E_K_folded`,
+`Oz_Kp_folded`, `Lz_K_folded`, `kpoints_folded`, `nk1_folded`,
+`nk2_folded` and `vol_M_folded`, so the folded result remains available
+for inspection without re-running the k-loop.  Three bookkeeping keys are
+added: `unfold = 1`, `unfold_pairs` (shape `(npairs, 2)`, the folded band
+indices making up each unfolded band) and `unfold_dropped` (folded bands
+with no partner inside the `bands` window — these are **discarded**, and
+a warning is printed).
+
+Because `nk1` and `vol_M` are stored in the output, the `isoenergy`,
+`onsager` and `onsager_bfield` stages pick the doubled mesh up
+automatically; the `nk1`/`nk2` entries in the input file are ignored when
+the data carries its own.  Note that `nk1 * nk2 * cell_area` is
+unchanged by unfolding — `vol_M` halves exactly as `nk1` doubles — so
+orbit areas remain on the same absolute scale.
+
+Two consequences worth knowing:
+
+- **Band count halves.** Request an even number of bands spanning
+  complete pairs.  A `bands` window ending mid-pair loses its odd band
+  to `unfold_dropped`.
+- **Berry curvature on a degeneracy line is basis-dependent.** Where the
+  two subbands are exactly degenerate, `Oz_lo` and `Oz_hi` are
+  individually arbitrary (LAPACK returns some combination) and only their
+  sum is well defined.  Unfolding inherits this; it affects a measure-zero
+  set of k-points and the total curvature is conserved exactly.
 
 ### Hofstadter susceptibility
 
@@ -542,6 +604,7 @@ elist = linspace(35,55,500)
 | `hofstadter_system.py` | Hofstadter H/V setup and per-k-point assembly |
 | `isoenergy.py`      | Grid-based orbit area detection (scipy.ndimage.label) |
 | `onsager.py`        | Onsager quantization: E(B) fan diagram |
+| `unfold.py`         | Magnetic BZ unfolding for folded Hofstadter bands (`unfold = 1`) |
 | `validate.py`       | Zero-field benchmark comparison against MATLAB `.mat` data |
 | `validate_hofstadter.py` | Hofstadter benchmark comparison |
 | `run.slurm`         | SLURM batch script |

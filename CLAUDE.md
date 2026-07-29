@@ -62,6 +62,7 @@ on hBN.  Four calculation modes:
 | `hofstadter_system.py` | Hofstadter H/V setup and per-k-point assembly |
 | `isoenergy.py` | Contour-based isoenergy orbit detection (marching squares + shoelace area) |
 | `onsager.py` | Onsager quantization solver: S(E)/(2π)² + corrections = B(n+½)/φ₀ |
+| `unfold.py` | Magnetic BZ unfolding for folded Hofstadter bands (`unfold = 1`) |
 | `input.txt` | Example input with Onsager parameters |
 | `doc_technical.md` | Technical reference for the semiclassical code |
 | `doc_user_guide.md` | Input/output reference for the semiclassical code |
@@ -112,6 +113,16 @@ than re-parsing the source.
   the off-diagonal blocks.  See Moon & Koshino, PRB 90, 155406 (2014),
   Eqs. 25 and B1.  This applies to `main_v3.py`, `zerofield.py`, and the
   semiclassical code (`bandstructure.py`, `hofstadter_system.py`).
+- **Magnetic BZ unfolding**: At flux `qq/pp = 2/(odd)` the Landau-gauge
+  construction cell makes the semiclassical magnetic BZ a factor of two
+  too small along G1, so every band appears as two non-mixing subbands
+  that swap hi/lo across degeneracy lines.  The optional bandstructure
+  parameter `unfold = 1` (default 0, `semiclassical/unfold.py`) detects
+  such pairs **from the data** — never from `qq/pp` — and recombines each
+  into one smooth band on the doubled zone, doubling `nk1` and halving
+  `vol_M`.  The folded arrays are always kept under `*_folded` keys.
+  Downstream stages read the mesh from the data via `_kmesh`, so
+  `isoenergy` and `onsager_bfield` inherit it automatically.
 - The basis label system (composite strings with `_` separators, searched
   via substring intersection) is load-bearing. Any change to label
   formatting will silently break `getindices` lookups.

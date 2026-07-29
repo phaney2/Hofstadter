@@ -72,15 +72,29 @@ def save_result(result, outfile, params=None):
 # Stage functions
 # ---------------------------------------------------------------------------
 
+def _kmesh(inp, bs_data):
+    """Mesh dimensions of a stored band structure.
+
+    Taken from the data when present so that an unfolded band structure carries
+    its doubled nk1 downstream; older files without the keys fall back to the
+    input file.
+    """
+    return (int(bs_data.get('nk1', inp['nk1'])),
+            int(bs_data.get('nk2', inp['nk2'])))
+
+
 def run_bandstructure(inp, fpath):
-    return do_calc(fpath)
+    result = do_calc(fpath)
+    if int(inp.get('unfold', 0)):
+        from unfold import unfold_bandstructure
+        result = unfold_bandstructure(result)
+    return result
 
 
 def run_isoenergy(inp, bs_data):
     from isoenergy import get_energy_resolved_data
 
-    nk1 = int(inp['nk1'])
-    nk2 = int(inp['nk2'])
+    nk1, nk2 = _kmesh(inp, bs_data)
     nbands = bs_data['E_K'].shape[0]
     kT = float(inp.get('kT', 3.0))
     nE = int(inp['nE'])
@@ -265,8 +279,7 @@ def run_onsager_bfield(inp, bs_data):
         inp.get('term_factors', np.array([1.0, 1.0]))).astype(float)
     term_factors = tuple(tf_raw[:2])
 
-    nk1 = int(inp['nk1'])
-    nk2 = int(inp['nk2'])
+    nk1, nk2 = _kmesh(inp, bs_data)
     vol_M = float(bs_data['vol_M'])
     nbands = bs_data['E_K'].shape[0]
     nB = len(Blist)

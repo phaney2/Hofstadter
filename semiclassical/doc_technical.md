@@ -6,11 +6,19 @@
 ```
 semiclassical.py          # stage-dispatch driver
   load_data                →  load .mat/.npz with MATLAB dimension handling
-  run_bandstructure        →  calls do_calc, augments with nk1/nk2
+  _kmesh                   →  (nk1, nk2) from the stored data, falling back to the input file
+  run_bandstructure        →  calls do_calc, applies unfolding when unfold=1
   run_isoenergy            →  calls get_energy_resolved_data for K/Kp
   run_onsager              →  calls onsager_fan for K/Kp, optionally loads chi
   __main__                 →  calctype dispatch (bandstructure/isoenergy/onsager/all)
 ```
+
+`do_calc` returns `nk1`/`nk2` in both the zero-field and Hofstadter
+branches, and `run_isoenergy` / `run_onsager_bfield` read the mesh
+through `_kmesh` rather than from the input file.  This is what lets an
+unfolded band structure carry its doubled `nk1` (and halved `vol_M`)
+downstream; files written before these keys existed fall back to the
+input file.
 
 ### Band structure engine (zero-field)
 ```
@@ -34,6 +42,12 @@ bandstructure.py          # mode branching
   _kpoint_worker_hofstadter →  per-k eigensolve + Berry curvature (no susceptibility)
   _do_calc_hofstadter       →  orchestrates Hofstadter k-loop
   do_calc                   →  branches on qq: if qq>0 → Hofstadter, else → zero-field
+
+unfold.py                 # magnetic BZ unfolding (opt-in, qq/pp = 2/odd)
+  analyze_pair              →  locate both degeneracy line families of a candidate pair
+  branch_label              →  parity label on the (nk2, 2*nk1) doubled grid
+  unfold_pair               →  select one branch of E / Oz / Lz
+  unfold_bandstructure      →  detect pairs, unfold, double the mesh, keep folded backup
 ```
 
 ### Susceptibility (standalone)
@@ -444,6 +458,142 @@ Implemented in `hamiltonian.py` as `get_berry_connection_K/Kp`.
 | vol_M | m^2 | Real-space magnetic unit cell area |
 
 Post-processing conversions match zero-field: Oz×1e-20, E×1e3, Lz×1e-20×1e3.
+
+## Magnetic BZ unfolding (`unfold.py`)
+
+Enabled by `unfold = 1`; applied in `run_bandstructure` after the k-loop
+and before the result is saved.  User-facing behaviour is in
+`doc_user_guide.md`; this section covers the mechanism.
+
+### Why the bands fold
+
+The Landau gauge requires a rectangular construction cell, which on a
+triangular moire lattice is the centered-rectangular two-lattice-point
+cell.  At flux `qq/pp = 2/(odd)` the magnetic translation group that
+survives is larger than the one the construction cell exposes: the true
+reciprocal lattice is `<2*G1, G2>` while the k-loop samples
+`<G1, G2>` with `G1 = b1/pp`, `G2 = qq*b2/pp`.  The computed BZ is
+therefore half the physical one along G1, and each physical band appears
+twice.
+
+The two copies belong to different eigenvalues of the extra translation
+and **never hybridize**, so they cross rather than anticross.  `eigvalsh`
+returns eigenvalues sorted ascending, so what is stored as band `n` is
+`min` of the two branches and band `n+1` is `max` — each a kinked
+composite, not a smooth surface.  The kinks are what corrupt orbit areas
+downstream.
+
+### Degeneracy line families
+
+In fractional coordinates `f1 = n1/nk1`, `f2 = n2/nk2` the two branches
+are degenerate on two line families:
+
+| Family | Locus | Line direction | Gap at the line |
+|---|---|---|---|
+| 1 | `f1 - f2 = 1/2`, symmetry-enforced | G1+G2 | 1e-13 … 5e-7 meV |
+| 2 | `f2 = h_off`, band- and valley-dependent | G1 | 0 (conical apex, generally off-grid) |
+
+Family 1 sits at exactly `1/2` for every pair tested (12 pairs at
+`pp=5,qq=2`; 6 at `pp=3,qq=2`; both valleys).  Family 2 has no fixed
+position — for `pp=3` it was 0.128/0.226/0.348 in K and
+0.877/0.676/0.775 in Kp.
+
+### Detection
+
+`analyze_pair` takes an adjacent pair as `(nk2, nk1)` arrays and locates
+both families in the gap `hi - lo`:
+
+- Family 1 from cuts at fixed `n2`, accepting only rows with **exactly
+  one** crossing; the offsets are averaged with circular statistics
+  (`_circ_mean`) since they live on `[0,1)`.
+- Family 2 from cuts at fixed `n1`, with the family-1 crossing excluded
+  by a `max(0.02, 3/nk2)` window in `f1 - f2`.
+
+The crossings are conical, not parabolic: the gap behaves like `|x|`, so
+a parabolic sub-grid fit reports a spurious finite gap at the apex.
+`_cone_minima` instead extrapolates the two linear flanks and intersects
+them, which recovers apexes lying between grid rows.
+
+`_qualifies` accepts a pair when both offsets fit, at least `min_frac`
+(default 0.9) of rows contribute a family-1 sample, both circular RMS
+values are within `max_rms` (default 0.02), and family 2 was seen on at
+least `nk1/4` columns.  The separation is not marginal — scoring every
+adjacent pair including deliberately wrong pairings gives
+`frac_rows` of exactly 1.000 for real pairs and exactly 0.000 for wrong
+ones, with `gap_min` differing by ~13 orders of magnitude (1e-13 meV vs
+≥1.8 meV).  A pair is unfolded only when **both valleys** qualify; time
+reversal guarantees they agree, and requiring it keeps the two valleys on
+a common band indexing.
+
+### Branch labelling
+
+`branch_label` assigns each point of the doubled grid the parity of the
+number of degeneracy lines crossed:
+
+```
+p_diag = floor(f1 - f2 - d_off + eps) % 2
+p_horz = floor(f2 - h_off + eps) % 2
+s      = (p_diag + p_horz) % 2
+```
+
+Neither parity is separately periodic under `f2 -> f2 + 1`, but their
+sum is; and the sum is periodic under `f1 -> f1 + 2` while flipping under
+`f1 -> f1 + 1`.  That is exactly the branch structure of a band folded
+once along G1, and it is why the label is single-valued only on the
+double cover — the algebraic restatement of "the true reciprocal lattice
+is `<2*G1, G2>`".  There is no screw boundary condition; the unfolded
+data is plainly periodic on the doubled rectangle.
+
+`eps = 0.01/max(nk1, nk2)` breaks a tie that arises when `nk1 == nk2`:
+the family-1 line then runs exactly through grid points, and without the
+bias their side of the cut is decided by the sign of the ~1e-8 residual
+of the offset fit.  The bias is 1% of a grid step — far above the
+observed fit error (≤3e-6) and far below a step.  A *half*-step bias
+would be wrong: it is right for family 1, whose crossing lands on a grid
+point, but family 2's apex genuinely falls between rows (e.g. 71.10) and
+a half-step shift would mislabel the adjacent row.
+
+`unfold_pair` then selects `lo` or `hi` by `s` on the `(nk2, 2*nk1)`
+grid.  E, Oz and Lz are all carried through the **same** label, so the
+three quantities stay mutually consistent.
+
+### Identities the result satisfies
+
+Verified exactly (0.00e+00) for all pairs and both valleys by
+`test_unfold_module.py`:
+
+- `{A, B}` is a permutation of `{E_lo, E_hi}` at every k-point — no data
+  is created or destroyed, only relabelled.
+- `B(k) == A(k + G1)` — the discarded branch is the translate of the kept
+  one, which is the defining property of a once-folded band.
+- `A` is periodic in `n1` with period `2*nk1`.
+- Total Berry curvature is conserved to machine precision.
+
+Roughness (max |second difference| of E along each axis) improves by
+30–50× at `pp=5, nk=200` and 18–25× at `pp=3, nk=40`, on both axes, for
+every pair.
+
+### Mesh bookkeeping
+
+`nk1 -> 2*nk1`, `nk2` unchanged, `vol_M -> vol_M/2`.  The k-points are
+tiled once along G1, with `G1` recovered from the stored mesh as
+`nk1 * (kp[0,1] - kp[0,0])`.
+
+`cell_area = (2π)²/(vol_M · nk1 · nk2)` is **invariant** under this
+transformation, which is why absolute orbit areas are unaffected.
+Confirmed downstream: traced contour area agrees with the exact enclosed
+k-point count to a median of 0.07% for the unfolded band, and the
+conservation law `S_unf(E) = S_lo(E) + S_hi(E)` holds to a median ratio
+of 1.0000 across the energies where the folded contours are still
+traceable.
+
+### Pre-existing normalization caveat
+
+The sampled k-zone holds `pp²/qq` primitive cells, which is 12.5 for
+`(pp,qq) = (5,2)` — not an integer.  Unfolding halves it to 6.25, still
+not the 5 that flux 1/5 would require.  This is a property of the
+Hofstadter k-zone convention, not of unfolding, and it does not affect
+orbit areas because `cell_area` is unchanged.
 
 ## Known considerations
 

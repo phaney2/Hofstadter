@@ -455,6 +455,8 @@ def _do_calc_hofstadter(inp):
         'Lz_K': Lz_K,
         'Lz_Kp': Lz_Kp,
         'vol_M': vol_M_m2,
+        'nk1': nk1,
+        'nk2': nk2,
     }
 
 
@@ -617,4 +619,6 @@ def do_calc(filepath):
         'Lz_K': Lz_K,
         'Lz_Kp': Lz_Kp,
         'vol_M': vol_M_m2,
+        'nk1': nk1,
+        'nk2': nk2,
     }
