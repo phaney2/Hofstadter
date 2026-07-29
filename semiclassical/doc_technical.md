@@ -366,30 +366,58 @@ further suffixed with `_seg0`, `_seg1`, etc. (e.g. `LL_K_band5_SBM_seg1`).
 
 `onsager_fan_band` builds the residual as `rhs + base` and roots it in E,
 with `rhs = Bmultiplier·B·(n + ½)/φ₀` and `base` accumulated term by
-term.  Written out (for `B > 0`), the condition is
+term.  `base_S` carries an explicit `-Bsign`, so dividing the whole
+condition by `sign(B)` puts every term on `|B|` and gives the readable
+form (`Bmultiplier = 1`):
 
 ```
-S(E)/(2π)² − BC_factor·Φ_B·B/(2π·φ₀)
-           + morb_factor·(dL/dE)·B/(2π·φ₀)
-           + chi_factor·(2π)·(dχ/dE)·B²/φ₀²   =   B·(n + ½)/φ₀
+S(E)/(2π)² = (|B|/φ₀)·[ (n + ½)
+                        + BC_factor  ·sign(B)·Φ_B/(2π)
+                        − morb_factor·(dL/dE)/(2π)
+                        − chi_factor ·(2π)·(dχ/dE)·B/φ₀ ]
 ```
 
-The minus on the Berry curvature term is the one non-obvious sign.
-`Φ_B` (`enclosedBC`) is the flux of `Oz` through the orbit interior with
-no orientation information attached (see "Isoenergy orbit detection"),
-whereas the Onsager phase is `φ_B = ∮ A·dk` taken *along the direction of
-motion*.  The semiclassical equation of motion `ℏk̇ = −e v×B` sends the
-k-orbit clockwise for charge `−e` at `B > 0`, so `φ_B = −Φ_B`.
+Against the textbook `S/(2π)² = (|B|/φ₀)(n + ½ − φ_B/2π)` this is
+`φ_B = −sign(B)·BC_factor·Φ_B`.
 
-This is a global sign, not a per-orbit one: it comes from the carrier
-charge and the field direction, both fixed, so it does not flip between
-electron-like and hole-like orbits.  It was validated by comparing
-`onsager_bfield` fans at `qq/pp = 1/2` against the exact Hofstadter
-spectrum across both electron and hole subbands, and independently by
-checking that the semiclassical Chern numbers from `Oz` reproduce the
-quantum σ_xy plateau steps band by band (see "Berry curvature sign" in
-the project `CLAUDE.md`).  `term_factors = [-1 ...]` restores the old
-convention if an older fan file has to be reproduced.
+The `sign(B)` on the Berry curvature term is the one non-obvious factor,
+and it is what `np.abs(B2)` in the source achieves — every other term
+uses `B2`.  `Φ_B` (`enclosedBC`) is the flux of `Oz` through the orbit
+interior with no orientation information attached (see "Isoenergy orbit
+detection"), whereas the Onsager phase is `φ_B = ∮ A·dk` taken *along the
+direction of motion*.  The equation of motion `ℏk̇ = −e v×B` sends the
+k-orbit clockwise for charge `−e` at `B > 0` and counterclockwise at
+`B < 0`, so `φ_B` is odd in `B` while `Φ_B` is not.
+
+Two distinct things follow, and conflating them is the trap:
+
+- The sign is **not per-orbit**.  It comes from the carrier charge and
+  the field direction, so it does not flip between electron-like and
+  hole-like orbits, and it must never be inferred from contour winding.
+- The sign **is per-field-direction**.  A `Blist` straddling zero needs
+  both branches within one run.  This is the normal case for
+  `onsager_bfield`, where `Blist` holds the deviation `δB` from the
+  background flux already contained in the band structure and its `Oz`.
+
+Validated three ways: (a) semiclassical Chern numbers from `Oz`
+reproduce the quantum σ_xy plateau steps band by band, fixing the
+`B > 0` branch; (b) `onsager_bfield` fans at `qq/pp = 1/2` track the
+exact Hofstadter spectrum across electron and hole subbands; (c) at
+`qq/pp = 1/3` over `δB ∈ [-2, 2] T` the solved fan matches
+`BC_factor = +1` for every `δB > 0` and `BC_factor = -1` for every
+`δB < 0` — 1436 LL keys, 25 386 finite entries, max |diff| = 0.
+
+`φ_B` jumps at `B = 0`; harmless, since the rhs vanishes there and no
+level is defined.
+
+The other three terms are all even in `B` in the bracket above.  For the
+`chi` term that is expected (it comes from a `B²` energy correction).
+For the `dL/dE` term it is **unverified** — if that term descends from an
+orbit energy shift `∝ M·B`, it should carry `sign(B)` too.  It is
+identically zero in `onsager_bfield` (the orbital moment is already in
+the dispersion, correctly odd in `B` there), and the perturbative
+`onsager` channel has no negative-`B` validation, so it has been left
+alone.  Revisit before trusting perturbative-channel fans at `B < 0`.
 
 ### Root-finding
 
@@ -669,9 +697,14 @@ orbit areas because `cell_area` is unchanged.
 - `construct_hopping` uses a double loop over Q-vectors (O(NG^2)). This
   runs once per calculation and is not a bottleneck, but could be
   vectorized if NG grows large.
-- The enclosed Berry curvature sign in the Onsager condition was wrong
-  (a `+` where the physics requires `−`) until it was corrected in
-  `onsager.py`; see "Term signs" above.  Fan files generated before that
-  change have shifted `SB`/`SBM`/`SBMC` levels and should be regenerated,
-  or reproduced from their `_detail.mat` with `--bc-factor -1`.  `_S`/`_SM`
-  levels are unaffected.
+- The enclosed Berry curvature term in the Onsager condition was wrong
+  until corrected in `onsager.py`: it had the wrong overall sign, and it
+  was even in `B` where the physics requires odd.  See "Term signs"
+  above.  Fan files generated before that change have shifted
+  `SB`/`SBM`/`SBMC` levels and should be regenerated; a `--bc-factor -1`
+  recompute reproduces the old values only for `B > 0` (at `B < 0` the
+  old code happened to agree with the corrected one).  `_S`/`_SM` levels
+  are unaffected.
+- The `dL/dE` term's parity in `B` is unverified — see the end of "Term
+  signs".  Only relevant to the perturbative `onsager` channel at
+  negative `B`.

@@ -209,19 +209,32 @@ differences — see below.
    is picked by `Path.contains_points`, so contour winding is never
    consumed).  The Onsager phase is the Berry phase along the direction
    of motion, and `ħk̇ = -e v×B` sends the k-orbit clockwise for charge
-   `-e` at `B > 0`, so `phi_B = -enclosedBC`.  This is a global sign set
-   by the carrier charge and field direction — it does not flip between
-   electron- and hole-like orbits.
-   Validated two ways: (a) `onsager_bfield` fans at `qq/pp = 1/2` now
-   track the exact Hofstadter spectrum across both electron and hole
-   subbands; (b) semiclassical Chern numbers from `Oz` reproduce the
-   `main_v3.py` transport σ_xy plateau steps band by band (bands 5–11,
-   `Δσ_xy` matching `C` to 3 decimals), confirming `Oz` itself was
-   correctly signed and the error was in the Onsager term alone.
+   `-e` at `B > 0` and counterclockwise at `B < 0`, so
+   `phi_B = -sign(B)*enclosedBC` — **odd in B**, unlike every other term
+   in the condition.  In the source this is the `np.abs(B2)` in the
+   `base_SB` line; all other terms use `B2`.
+   Two things follow, and conflating them is the trap: the sign is *not*
+   per-orbit (it comes from the carrier charge and field direction, so it
+   does not flip between electron- and hole-like orbits, and must never
+   be read off contour winding), but it *is* per-field-direction.  A
+   `Blist` straddling zero needs both branches in one run — the normal
+   case for `onsager_bfield`, where `Blist` is the deviation `δB` from
+   the background flux already baked into the band structure and `Oz`.
+   Validated three ways: (a) semiclassical Chern numbers from `Oz`
+   reproduce the `main_v3.py` transport σ_xy plateau steps band by band
+   (bands 5–11, `Δσ_xy` matching `C` to 3 decimals), fixing the `B > 0`
+   branch and confirming `Oz` itself was correctly signed; (b)
+   `onsager_bfield` fans at `qq/pp = 1/2` track the exact Hofstadter
+   spectrum across both electron and hole subbands; (c) at `qq/pp = 1/3`
+   over `δB ∈ [-2, 2] T` the solved fan matches `BC_factor = +1` for
+   every `δB > 0` and `BC_factor = -1` for every `δB < 0` (1436 LL keys,
+   25386 finite entries, max |diff| = 0).
    **Fan files generated before this fix are stale**: `_SB`, `_SBM`,
-   `_SBMC` levels are shifted (`_S`/`_SM` are unaffected).  Regenerate
-   them, or reproduce the old values from the `*_detail.mat` with
-   `recompute_onsager.py --bc-factor -1`.
+   `_SBMC` levels are shifted for `B > 0` (`_S`/`_SM` are unaffected, and
+   the old code happened to be right for `B < 0`).  Regenerate them.
+   The `dL/dE` term's parity in `B` is unverified and may have the same
+   problem; it is identically zero in `onsager_bfield`, so this only
+   concerns the perturbative `onsager` channel at negative `B`.
 
 4. **Energy grid resolution**: The Onsager solver uses `argmin` over a
    discrete energy grid. With `kT=3 meV` broadening, energy grids coarser

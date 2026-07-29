@@ -165,10 +165,13 @@ def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
         result[f'S{sfx}'] = _solve_onsager(rhs, base_S, seg_valid, seg_E)
 
         # enclosedBC is the Berry curvature flux through the polygon interior
-        # with fixed orientation, but the Onsager phase is the Berry phase
-        # along the direction of motion.  hbar*kdot = -e v x B drives the
-        # k-orbit clockwise for charge -e at B > 0, so phi_B = -enclosedBC.
-        base_SB = base_S + BC_factor * seg_BC[:, np.newaxis] * B2 / (2 * np.pi * PHI0)
+        # and carries no orientation, but the Onsager phase is the Berry
+        # phase along the direction of motion.  hbar*kdot = -e v x B sends
+        # the k-orbit clockwise for charge -e at B > 0 and counterclockwise
+        # at B < 0, so phi_B = -sign(B)*enclosedBC -- odd in B.  |B| here
+        # (not B) is what makes it odd, since dividing the condition by
+        # Bsign is what puts every other term on |B|.
+        base_SB = base_S + BC_factor * seg_BC[:, np.newaxis] * np.abs(B2) / (2 * np.pi * PHI0)
         result[f'SB{sfx}'] = _solve_onsager(rhs, base_SB, seg_valid, seg_E)
 
         base_SBM = base_SB - morb_factor * seg_dLdE[:, np.newaxis] * B2 / (2 * np.pi * PHI0)

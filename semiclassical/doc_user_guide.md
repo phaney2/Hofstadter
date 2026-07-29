@@ -84,25 +84,38 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 The Onsager quantization condition solved by the code is:
 
 ```
-S(E)/(2π)² − BC_factor × Φ_B·B/(2π·φ₀)
-           + morb_factor × (dL/dE)·B/(2π·φ₀)
-           + chi_factor × (2π)·(dχ/dE)·B²/φ₀²
-           = B·(n + ½)/φ₀
+S(E)/(2π)² = (|B|/φ₀) × [ (n + ½)
+                          + BC_factor   × sign(B)·Φ_B/(2π)
+                          − morb_factor × (dL/dE)/(2π)
+                          − chi_factor  × (2π)·(dχ/dE)·B/φ₀ ]
 ```
 
 where `S(E)` is the orbit area in k-space, `Φ_B` is the enclosed Berry
 curvature, `dL/dE` is the energy derivative of the orbital moment, and
 `dχ/dE` is the Fukuyama susceptibility derivative. `φ₀ = 2πℏ/e` is the
-flux quantum.
+flux quantum.  Comparing with the textbook form
+`S/(2π)² = (|B|/φ₀)(n + ½ − φ_B/2π)` identifies the Berry phase as
+`φ_B = −sign(B)·BC_factor·Φ_B`.
 
 **Sign of the Berry curvature term.** `Φ_B` is computed as the flux of
 `Oz` through the orbit interior, which is orientation-independent (the
 interior is selected by point-in-polygon, not by contour winding).  The
 Onsager phase, however, is the Berry phase accumulated *along the
-direction of motion*, and `ℏk̇ = −e v×B` drives the k-orbit clockwise for
-charge `−e` at `B > 0`.  Hence `φ_B = −Φ_B`, which is the minus sign
-above.  This was validated against exact quantum σ_xy plateaus — see
-"Berry curvature sign" in the top-level `CLAUDE.md`.
+direction of motion*, and `ℏk̇ = −e v×B` sends the k-orbit clockwise for
+charge `−e` at `B > 0` and counterclockwise at `B < 0`.  So `φ_B` is
+**odd in B**: `φ_B = −sign(B)·Φ_B`.  Every other term in the bracket
+above is even in `B`; only this one carries `sign(B)`.
+
+This matters whenever `Blist` contains both signs.  In `onsager_bfield`
+the field in `Blist` is the deviation `δB` from the background flux
+already built into the band structure, so `Blist` routinely straddles
+zero and both branches are exercised in a single run.  Validated against
+exact quantum σ_xy plateaus (at `B > 0`) and against the Hofstadter
+spectrum on both sides of `δB = 0` — see "Berry curvature sign" in the
+top-level `CLAUDE.md`.
+
+`φ_B` is discontinuous at `B = 0`, which is harmless: the rhs vanishes
+there and no Landau level is defined.
 
 The code **always** computes four cumulative sets of Landau levels:
 
@@ -129,9 +142,9 @@ third.
 
 | Factor         | Term | Physical origin |
 |---|---|---|
-| `BC_factor`    | `−Φ_B·B/(2π·φ₀)` | Enclosed Berry curvature — shifts the Maslov phase.  `BC_factor = 1` is the physically correct value (see sign note above); `BC_factor = -1` reproduces the pre-fix behaviour |
-| `morb_factor`  | `(dL/dE)·B/(2π·φ₀)` | Orbital magnetic moment — energy shift of orbits in B |
-| `chi_factor`   | `(2π)·(dχ/dE)·B²/φ₀²` | Fukuyama susceptibility — second-order B² correction |
+| `BC_factor`    | `sign(B)·Φ_B/(2π)` | Enclosed Berry curvature — shifts the Maslov phase.  `BC_factor = 1` is the physically correct value (see sign note above); `BC_factor = -1` flips it |
+| `morb_factor`  | `−(dL/dE)/(2π)` | Orbital magnetic moment — energy shift of orbits in B |
+| `chi_factor`   | `−(2π)·(dχ/dE)·B/φ₀` | Fukuyama susceptibility — second-order B² correction |
 
 ### Example input file
 
