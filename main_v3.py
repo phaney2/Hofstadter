@@ -27,8 +27,9 @@ from hamiltonian import (get_interbilayerterms_K, get_interbilayerterms_Kp,
 
 HBAR_EV = 6.582119569e-16  # eV*s
 
-# np.trapezoid is the numpy>=2 name for np.trapz
-_trapz = getattr(np, 'trapezoid', np.trapz)
+# np.trapezoid is the numpy>=2 name for np.trapz (which numpy>=2 removed,
+# so the fallback must not be evaluated eagerly)
+_trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
 
 
 # ---------------------------------------------------------------------------

@@ -84,7 +84,7 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 The Onsager quantization condition solved by the code is:
 
 ```
-S(E)/(2π)² + BC_factor × Φ_B·B/(2π·φ₀)
+S(E)/(2π)² − BC_factor × Φ_B·B/(2π·φ₀)
            + morb_factor × (dL/dE)·B/(2π·φ₀)
            + chi_factor × (2π)·(dχ/dE)·B²/φ₀²
            = B·(n + ½)/φ₀
@@ -94,6 +94,15 @@ where `S(E)` is the orbit area in k-space, `Φ_B` is the enclosed Berry
 curvature, `dL/dE` is the energy derivative of the orbital moment, and
 `dχ/dE` is the Fukuyama susceptibility derivative. `φ₀ = 2πℏ/e` is the
 flux quantum.
+
+**Sign of the Berry curvature term.** `Φ_B` is computed as the flux of
+`Oz` through the orbit interior, which is orientation-independent (the
+interior is selected by point-in-polygon, not by contour winding).  The
+Onsager phase, however, is the Berry phase accumulated *along the
+direction of motion*, and `ℏk̇ = −e v×B` drives the k-orbit clockwise for
+charge `−e` at `B > 0`.  Hence `φ_B = −Φ_B`, which is the minus sign
+above.  This was validated against exact quantum σ_xy plateaus — see
+"Berry curvature sign" in the top-level `CLAUDE.md`.
 
 The code **always** computes four cumulative sets of Landau levels:
 
@@ -109,9 +118,18 @@ The `term_factors` parameter is an optional 3-element array
 correction term.  Default is `[1 1 1]`.  Use e.g. `[1 -1 1]` to flip the
 sign of the orbital moment term.
 
+**`onsager_bfield` reads only 2 elements.**  In the non-perturbative
+channel the orbital moment is already folded into the dispersion
+(`E_mod = E + gfactor·B·Lz`), so the `dL/dE` term is identically zero and
+`morb_factor` is meaningless.  There, `term_factors` is
+`[BC_factor chi_factor]` — the second element is the chi prefactor, not
+the morb prefactor.  The stage internally expands it to
+`(BC_factor, 0, chi_factor)`.  Passing 3 elements silently ignores the
+third.
+
 | Factor         | Term | Physical origin |
 |---|---|---|
-| `BC_factor`    | `Φ_B·B/(2π·φ₀)` | Enclosed Berry curvature — shifts the Maslov phase |
+| `BC_factor`    | `−Φ_B·B/(2π·φ₀)` | Enclosed Berry curvature — shifts the Maslov phase.  `BC_factor = 1` is the physically correct value (see sign note above); `BC_factor = -1` reproduces the pre-fix behaviour |
 | `morb_factor`  | `(dL/dE)·B/(2π·φ₀)` | Orbital magnetic moment — energy shift of orbits in B |
 | `chi_factor`   | `(2π)·(dχ/dE)·B²/φ₀²` | Fukuyama susceptibility — second-order B² correction |
 
@@ -291,6 +309,11 @@ curve into multiple monotonic segments, keys are further suffixed
 
 ### Onsager_bfield output (`calctype = onsager_bfield`)
 
+This stage writes **two** files.  The LL fan goes to `outputfile`; the
+bulky per-B intermediates go to `<outputfile base>_detail.mat`.
+
+Fan file (`outputfile`), nested under `results` as usual:
+
 | Variable                  | Shape                 | Units   | Description |
 |---|---|---|---|
 | `Blist`                   | (nB,)                | T       | Magnetic field values |
@@ -301,12 +324,67 @@ curve into multiple monotonic segments, keys are further suffixed
 | `onsager_Bmultiplier`     | scalar                | —       | B multiplier in Onsager rhs (diagnostic) |
 | `LL_{v}_band{n}_SM`       | (nB, nmax+1)          | meV     | LL from area (morb in dispersion) |
 | `LL_{v}_band{n}_SBM`      | (nB, nmax+1)          | meV     | + enclosed BC |
+
+Detail file (`<base>_detail.mat`), saved **flat** — no `results`/`params`
+wrapper, since it holds no parameters:
+
+| Variable                  | Shape                 | Units   | Description |
+|---|---|---|---|
+| `Blist`                   | (nB,)                | T       | Magnetic field values |
 | `area_K_band{n}`          | (nB, nE, npockets)    | m^-2    | K valley orbit areas per B |
 | `area_Kp_band{n}`         | (nB, nE, npockets)    | m^-2    | K' valley orbit areas per B |
 | `enclosedBC_K_band{n}`    | (nB, nE, npockets)    | —       | K valley enclosed BC per B |
 | `enclosedBC_Kp_band{n}`   | (nB, nE, npockets)    | —       | K' valley enclosed BC per B |
 | `E_levels_K_band{n}`      | (nB, nE)              | meV     | Energy grid per B (K valley) |
 | `E_levels_Kp_band{n}`     | (nB, nE)              | meV     | Energy grid per B (K' valley) |
+
+These four arrays (`Blist`, `area`, `enclosedBC`, `E_levels`) are the
+complete input to the quantization step, so the fan can be rebuilt from
+the detail file alone — see `recompute_onsager.py` below.
+
+### Re-solving the fan from detail data (`recompute_onsager.py`)
+
+Standalone utility.  Re-runs only the Onsager root-finding, skipping the
+expensive contour work, so a full 13-band / 2-valley / 200-B file takes
+seconds instead of hours.  Intended for sweeping the correction
+prefactors — this is the tool that resolved the enclosed Berry curvature
+sign (see "Berry curvature sign" in the project `CLAUDE.md`).
+
+```bash
+# rebuild the fan from detail data
+python recompute_onsager.py onsager_12_2_detail.mat \
+       --ref onsager_12_2.mat --out none
+
+# both BC signs side by side in one file
+python recompute_onsager.py onsager_12_2_detail.mat \
+       --ref onsager_12_2.mat --bc-factor 1,-1 --out onsager_12_2_bcsign.mat
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `detail` (positional) | — | path to `<name>_detail.mat` |
+| `--ref FILE` | none | original fan `.mat`; supplies `nmax` and `onsager_Bmultiplier`, and every recomputed band is diffed against it |
+| `--out FILE` | `<base>_recomp.mat` | output file; `none` to compare without writing |
+| `--bc-factor` | `1` | comma-separated Berry curvature prefactors (= `term_factors[0]`) |
+| `--nmax` | from `--ref`, else 50 | maximum LL index |
+| `--Bmultiplier` | from `--ref`, else 1 | B multiplier in the rhs |
+| `--lifshitz-threshold` | 50 | segment-splitting threshold |
+| `--bands`, `--valleys` | all | restrict the recompute |
+| `--in-memory` | off | load the whole detail file at once (faster, needs several GB) |
+
+With a single `--bc-factor` the output keys match the original file
+exactly (`LL_{v}_band{n}_SM`, `..._SBM`, plus `_seg{i}` variants).  With
+several, `_bcf0`, `_bcf1`, ... are appended in the order given and the
+values are recorded in `bc_factors`.  Note that the `SM` (area-only)
+levels are identical across BC factors by construction — only `SBM`
+responds.
+
+The round trip is bit-exact: rebuilding a fan from its own detail file
+reproduces it to max |diff| = 0 with no NaN-pattern mismatches (verified
+on `onsager_12_2.mat`, 13 bands × 2 valleys × 200 B, and on
+`onsager_12_4.mat`, 90 B).  Note that fan files written **before** the
+Berry curvature sign fix will differ in `SBM` — recompute those with
+`--bc-factor -1` to reproduce them, or just regenerate them.
 
 ## Post-processing pipeline
 
@@ -604,6 +682,7 @@ elist = linspace(35,55,500)
 | `hofstadter_system.py` | Hofstadter H/V setup and per-k-point assembly |
 | `isoenergy.py`      | Grid-based orbit area detection (scipy.ndimage.label) |
 | `onsager.py`        | Onsager quantization: E(B) fan diagram |
+| `recompute_onsager.py` | Re-solve the fan from `*_detail.mat` with different correction prefactors |
 | `unfold.py`         | Magnetic BZ unfolding for folded Hofstadter bands (`unfold = 1`) |
 | `validate.py`       | Zero-field benchmark comparison against MATLAB `.mat` data |
 | `validate_hofstadter.py` | Hofstadter benchmark comparison |

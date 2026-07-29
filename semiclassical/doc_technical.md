@@ -309,6 +309,15 @@ E_2d = E_bands[n, :].reshape(nk2, nk1, order='F')
 This matches the physics of MATLAB's `contourc` + `polyarea` + `inpolygon`
 approach. Orbit areas agree with MATLAB benchmark to machine precision.
 
+**Both outputs are orientation-independent.**  `_shoelace_area` takes
+`np.abs` of the signed shoelace sum, and step 7 selects the polygon
+interior by point-in-polygon rather than by winding number.  So the
+contour orientation returned by `find_contours` — which is mixed CCW/CW
+across energies within a single band — never reaches `area` or
+`enclosedBC`.  The direction of traversal enters only as a fixed sign in
+the Onsager condition (see below); it is not, and must not be, inferred
+per orbit from the contour.
+
 ## Parallelization
 
 - k-loop: `multiprocessing.Pool` (embarrassingly parallel)
@@ -352,6 +361,35 @@ arrays with suffixes `_S`, `_SB`, `_SBM`, `_SBMC` (e.g.
 `LL_K_band{i}_S`, `LL_K_band{i}_SBM`) for each band with orbits.
 When Lifshitz transitions split a band into multiple segments, keys are
 further suffixed with `_seg0`, `_seg1`, etc. (e.g. `LL_K_band5_SBM_seg1`).
+
+### Term signs
+
+`onsager_fan_band` builds the residual as `rhs + base` and roots it in E,
+with `rhs = Bmultiplier·B·(n + ½)/φ₀` and `base` accumulated term by
+term.  Written out (for `B > 0`), the condition is
+
+```
+S(E)/(2π)² − BC_factor·Φ_B·B/(2π·φ₀)
+           + morb_factor·(dL/dE)·B/(2π·φ₀)
+           + chi_factor·(2π)·(dχ/dE)·B²/φ₀²   =   B·(n + ½)/φ₀
+```
+
+The minus on the Berry curvature term is the one non-obvious sign.
+`Φ_B` (`enclosedBC`) is the flux of `Oz` through the orbit interior with
+no orientation information attached (see "Isoenergy orbit detection"),
+whereas the Onsager phase is `φ_B = ∮ A·dk` taken *along the direction of
+motion*.  The semiclassical equation of motion `ℏk̇ = −e v×B` sends the
+k-orbit clockwise for charge `−e` at `B > 0`, so `φ_B = −Φ_B`.
+
+This is a global sign, not a per-orbit one: it comes from the carrier
+charge and the field direction, both fixed, so it does not flip between
+electron-like and hole-like orbits.  It was validated by comparing
+`onsager_bfield` fans at `qq/pp = 1/2` against the exact Hofstadter
+spectrum across both electron and hole subbands, and independently by
+checking that the semiclassical Chern numbers from `Oz` reproduce the
+quantum σ_xy plateau steps band by band (see "Berry curvature sign" in
+the project `CLAUDE.md`).  `term_factors = [-1 ...]` restores the old
+convention if an older fan file has to be reproduced.
 
 ### Root-finding
 
@@ -408,13 +446,36 @@ and solves the Onsager condition. The rhs of the Onsager condition is
 
 Since the orbital moment is already in the energy surface, output suffixes
 are `_SM` (area only, morb in dispersion) and `_SBM` (+ enclosed BC).
+For the same reason `term_factors` is read as 2 elements here —
+`[BC_factor chi_factor]`, expanded internally to
+`(BC_factor, 0.0, chi_factor)` — since `morb_factor` would multiply an
+identically-zero `dL_dE`.
 
 Each B value is independent; parallelized over Blist via `multiprocessing.Pool`
 when `isparallel=1`. The worker calls `isoenergy_areas` directly (not
 `get_energy_resolved_data`) to avoid computing `dL_dE`.
 
 Intermediate data (orbit areas, enclosed BC, energy grids) are saved per B
-for debugging.
+to a separate `<outputfile base>_detail.mat`, written flat (no
+`results`/`params` wrapper).  The LL fan itself goes to `outputfile`.
+
+### Re-solving from detail data (`recompute_onsager.py`)
+
+`Blist`, `area_{v}_band{n}`, `enclosedBC_{v}_band{n}` and
+`E_levels_{v}_band{n}` are the complete input set to `onsager_fan_band`,
+so the fan can be rebuilt from the detail file without redoing the
+contour work.  `recompute_onsager.py` does exactly that, looping over B
+the same way the worker does and applying the same `S` -> `SM`,
+`SB` -> `SBM` renaming (with `dL_dE = 0` and `morb_factor = 0`, since the
+orbital moment is already in the dispersion).  Given the same prefactors
+it reproduces the stored fan bit-for-bit.
+
+Its purpose is cheap prefactor sweeps: `--bc-factor` is `term_factors[0]`
+and accepts several values at once, so `--bc-factor 1,-1` puts both signs
+of the enclosed Berry curvature term in one output file (keys suffixed
+`_bcf0`, `_bcf1`).  A 200-B, 13-band, 2-valley recompute takes ~10 s.
+This is how the enclosed-BC sign was settled; it is also how to
+reproduce a fan file written before that fix (`--bc-factor -1`).
 
 ## Hofstadter mode internals
 
@@ -608,3 +669,9 @@ orbit areas because `cell_area` is unchanged.
 - `construct_hopping` uses a double loop over Q-vectors (O(NG^2)). This
   runs once per calculation and is not a bottleneck, but could be
   vectorized if NG grows large.
+- The enclosed Berry curvature sign in the Onsager condition was wrong
+  (a `+` where the physics requires `−`) until it was corrected in
+  `onsager.py`; see "Term signs" above.  Fan files generated before that
+  change have shifted `SB`/`SBM`/`SBMC` levels and should be regenerated,
+  or reproduced from their `_detail.mat` with `--bc-factor -1`.  `_S`/`_SM`
+  levels are unaffected.

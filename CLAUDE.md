@@ -62,6 +62,7 @@ on hBN.  Four calculation modes:
 | `hofstadter_system.py` | Hofstadter H/V setup and per-k-point assembly |
 | `isoenergy.py` | Contour-based isoenergy orbit detection (marching squares + shoelace area) |
 | `onsager.py` | Onsager quantization solver: S(E)/(2π)² + corrections = B(n+½)/φ₀ |
+| `recompute_onsager.py` | Re-solve the LL fan from a saved `*_detail.mat` with different correction prefactors (e.g. flipped BC sign) |
 | `unfold.py` | Magnetic BZ unfolding for folded Hofstadter bands (`unfold = 1`) |
 | `input.txt` | Example input with Onsager parameters |
 | `doc_technical.md` | Technical reference for the semiclassical code |
@@ -200,12 +201,27 @@ differences — see below.
    semicolon, making the `chiflag * dChi_dE` term a no-op. When
    comparing against MATLAB, use the `_SBM` output (which excludes chi).
 
-3. **Enclosed Berry curvature sign**: There is an unresolved systematic
-   shift in LL positions for bands in the +40 to +60 meV range (K valley).
-   Flipping the sign of the enclosed BC term partially corrects it.
-   Likely a contour winding / "inside vs outside" convention difference
-   between Python's `find_contours` + `Path.contains_points` and MATLAB's
-   `contourc` + `inpolygon`. Needs investigation.
+3. **Berry curvature sign (RESOLVED)**: The enclosed BC term in the
+   Onsager condition had the wrong sign, causing a systematic shift in
+   LL positions.  Fixed in `onsager.py` — the term is now subtracted.
+   `enclosedBC` is the flux of `Oz` through the orbit interior with no
+   orientation attached (`_shoelace_area` takes `abs`, and the interior
+   is picked by `Path.contains_points`, so contour winding is never
+   consumed).  The Onsager phase is the Berry phase along the direction
+   of motion, and `ħk̇ = -e v×B` sends the k-orbit clockwise for charge
+   `-e` at `B > 0`, so `phi_B = -enclosedBC`.  This is a global sign set
+   by the carrier charge and field direction — it does not flip between
+   electron- and hole-like orbits.
+   Validated two ways: (a) `onsager_bfield` fans at `qq/pp = 1/2` now
+   track the exact Hofstadter spectrum across both electron and hole
+   subbands; (b) semiclassical Chern numbers from `Oz` reproduce the
+   `main_v3.py` transport σ_xy plateau steps band by band (bands 5–11,
+   `Δσ_xy` matching `C` to 3 decimals), confirming `Oz` itself was
+   correctly signed and the error was in the Onsager term alone.
+   **Fan files generated before this fix are stale**: `_SB`, `_SBM`,
+   `_SBMC` levels are shifted (`_S`/`_SM` are unaffected).  Regenerate
+   them, or reproduce the old values from the `*_detail.mat` with
+   `recompute_onsager.py --bc-factor -1`.
 
 4. **Energy grid resolution**: The Onsager solver uses `argmin` over a
    discrete energy grid. With `kT=3 meV` broadening, energy grids coarser
