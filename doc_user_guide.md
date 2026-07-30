@@ -4,7 +4,7 @@ Moire band structure solvers for mono- or bilayer graphene on hBN.
 
 Two calculation modes:
 
-- **Hofstadter** (`main_v2.py`): Magnetic Bloch bands at rational flux
+- **Hofstadter** (`main_v3.py`): Magnetic Bloch bands at rational flux
   qq/pp, using a Landau-level basis.
 - **Zero-field** (`zerofield.py`): Moire band structure along a k-path
   through the moire BZ, using a plane-wave expansion.
@@ -16,8 +16,8 @@ Two calculation modes:
 ### Hofstadter (magnetic field)
 
 ```bash
-python main_v2.py                   # default input_test.txt
-python main_v2.py my_params.txt     # custom input
+python main_v3.py                   # default input_test.txt
+python main_v3.py my_params.txt     # custom input
 ```
 
 Output defaults to `bands_p{pp}_q{qq}.npz`.
@@ -285,7 +285,7 @@ or `4*NQ^2` (bilayer).  Multiply eigenvalues by 1000 for meV.
 ## Programmatic usage
 
 ```python
-from main_v2 import do_calc
+from main_v3 import do_calc
 
 result = do_calc('input_test.txt')
 
