@@ -144,10 +144,13 @@ def run_onsager(inp, iso_data):
         print(f"  Loaded susceptibility from {inp['susceptibility_datafile']}")
 
     lifshitz_threshold = float(inp.get('lifshitz_threshold', 50))
+    Bmultiplier = float(inp.get('onsager_Bmultiplier', 4.0))
 
-    print(f"  Onsager: {len(Blist)} B values, nmax={nmax}, term_factors={term_factors}")
+    print(f"  Onsager: {len(Blist)} B values, nmax={nmax}, "
+          f"term_factors={term_factors}, Bmultiplier={Bmultiplier}")
 
-    result = {'Blist': Blist, 'nmax': nmax}
+    result = {'Blist': Blist, 'nmax': nmax,
+              'onsager_Bmultiplier': Bmultiplier}
 
     for valley in ('K', 'Kp'):
         n_with_orbits = 0
@@ -177,6 +180,7 @@ def run_onsager(inp, iso_data):
                 iso_data[f'enclosedBC_{valley}_band{n}'],
                 np.atleast_1d(iso_data[f'dL_dE_{valley}_band{n}']).ravel(),
                 dChi_dE=dChi, term_factors=term_factors,
+                Bmultiplier=Bmultiplier,
                 lifshitz_threshold=lifshitz_threshold)
 
             if ll_dict is not None:
@@ -269,7 +273,7 @@ def run_onsager_bfield(inp, bs_data):
     nmax = int(inp.get('nmax', 50))
     nE = int(inp['nE'])
     gfactor = float(inp.get('gfactor', 1.0))
-    Bmultiplier = float(inp.get('onsager_Bmultiplier', 1.0))
+    Bmultiplier = float(inp.get('onsager_Bmultiplier', 4.0))
     isparallel = int(inp.get('isparallel', 0))
     nprocs = inp.get('nprocs', os.environ.get('SLURM_CPUS_PER_TASK', None))
     if nprocs is not None:

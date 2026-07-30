@@ -46,6 +46,8 @@ on hBN.  Four calculation modes:
 | `input_zerofield.txt` | Default zero-field input |
 | `doc_technical.md` | Code structure reference |
 | `doc_user_guide.md` | Input/output reference |
+| `notes_scba.tex` | Write-up: SCBA formalism and implementation |
+| `notes_onsager.tex` | Write-up: Onsager quantization sign conventions and Berry curvature computation (draft source for publication SI) |
 | `bands_p*_q*.mat` | Hofstadter MATLAB benchmark data |
 | `matlab_code/zerofield/` | Original MATLAB zero-field code and benchmark (`bands_BG.mat`) |
 | `matlab_code/` | Original MATLAB Hofstadter code |
@@ -201,18 +203,23 @@ differences — see below.
    semicolon, making the `chiflag * dChi_dE` term a no-op. When
    comparing against MATLAB, use the `_SBM` output (which excludes chi).
 
-3. **Berry curvature sign (RESOLVED)**: The enclosed BC term in the
-   Onsager condition had the wrong sign, causing a systematic shift in
-   LL positions.  Fixed in `onsager.py` — the term is now subtracted.
-   `enclosedBC` is the flux of `Oz` through the orbit interior with no
-   orientation attached (`_shoelace_area` takes `abs`, and the interior
-   is picked by `Path.contains_points`, so contour winding is never
-   consumed).  The Onsager phase is the Berry phase along the direction
-   of motion, and `ħk̇ = -e v×B` sends the k-orbit clockwise for charge
-   `-e` at `B > 0` and counterclockwise at `B < 0`, so
-   `phi_B = -sign(B)*enclosedBC` — **odd in B**, unlike every other term
-   in the condition.  In the source this is the `np.abs(B2)` in the
-   `base_SB` line; all other terms use `B2`.
+3. **Berry curvature sign (RESOLVED)**: `enclosedBC` is the flux of `Oz`
+   through the orbit interior with no orientation attached
+   (`_shoelace_area` takes `abs`, and the interior is picked by
+   `Path.contains_points`, so contour winding is never consumed).  The
+   Onsager phase is the Berry phase along the direction of motion, and
+   `ħk̇ = -e v×B` reverses the traversal sense under `B → -B`, so
+   `phi_B = +sign(B)*enclosedBC` — **odd in B**, unlike every other term
+   in the condition.  In the source the parity is the `np.abs(B2)` in the
+   `base_SB` line (all other terms use `B2`) and the overall sign is the
+   leading minus on that line.
+   The **parity** is forced by the equation of motion.  The **overall
+   sign** is fixed by validation (b) below, and now *agrees* with the
+   traversal argument: an electron-like orbit at `B > 0` runs
+   counterclockwise, giving `phi_B = +Phi_B` by Stokes.  The code
+   previously carried the opposite sign and documented the conflict as an
+   unresolved open issue; it is resolved — the traversal argument was
+   right and the implementation was wrong.
    Two things follow, and conflating them is the trap: the sign is *not*
    per-orbit (it comes from the carrier charge and field direction, so it
    does not flip between electron- and hole-like orbits, and must never
@@ -220,21 +227,40 @@ differences — see below.
    `Blist` straddling zero needs both branches in one run — the normal
    case for `onsager_bfield`, where `Blist` is the deviation `δB` from
    the background flux already baked into the band structure and `Oz`.
-   Validated three ways: (a) semiclassical Chern numbers from `Oz`
-   reproduce the `main_v3.py` transport σ_xy plateau steps band by band
-   (bands 5–11, `Δσ_xy` matching `C` to 3 decimals), fixing the `B > 0`
-   branch and confirming `Oz` itself was correctly signed; (b)
-   `onsager_bfield` fans at `qq/pp = 1/2` track the exact Hofstadter
-   spectrum across both electron and hole subbands; (c) at `qq/pp = 1/3`
-   over `δB ∈ [-2, 2] T` the solved fan matches `BC_factor = +1` for
-   every `δB > 0` and `BC_factor = -1` for every `δB < 0` (1436 LL keys,
-   25386 finite entries, max |diff| = 0).
-   **Fan files generated before this fix are stale**: `_SB`, `_SBM`,
-   `_SBMC` levels are shifted for `B > 0` (`_S`/`_SM` are unaffected, and
-   the old code happened to be right for `B < 0`).  Regenerate them.
+   Validated: (a) semiclassical Chern numbers from `Oz` reproduce the
+   `main_v3.py` transport σ_xy plateau steps band by band (bands 5–11,
+   `Δσ_xy` matching `C` to 3 decimals) — this constrains the sign of `Oz`
+   itself, *not* the Berry term in the quantization condition, so it is
+   unaffected by the correction; (b) with the parity switched off
+   (`recompute_onsager.py --bc-sign-mode fixed`) the exact Hofstadter
+   spectrum picks `BC_factor = +1` on `δB < 0` and `BC_factor = -1` on
+   `δB > 0` at all four fluxes tested (`qq/pp` = 1/2, 1/3, 2/5, 2/3;
+   folded and unfolded) — both are the single odd-in-`B` convention
+   above.  The discriminator is the *crossover* at the background field,
+   not the residual magnitude; margins are 3.6×/3.9× at 1/2 and 3.8×/4.9×
+   at 2/3.  Only quantitative per-branch scoring separates the two
+   candidate signs — the earlier, weaker claim that fans at 1/2
+   qualitatively "track the exact spectrum" does not.
+   **Fan files generated before 2026-07-30 are stale**: they predate both
+   this sign flip and the `onsager_Bmultiplier` default change, so `_SB`,
+   `_SBM`, `_SBMC` will not reproduce (`_S`/`_SM` are unaffected by the
+   sign but do move with `Bmultiplier`).  Regenerate them.
    The `dL/dE` term's parity in `B` is unverified and may have the same
    problem; it is identically zero in `onsager_bfield`, so this only
    concerns the perturbative `onsager` channel at negative `B`.
+
+   **`onsager_Bmultiplier` defaults to 4**, not 1, and is not a free
+   knob: scanned against the exact Hofstadter spectrum the optimum is 4
+   at every flux tested, while the two geometric candidates
+   (`vol_M/A_uc`, ranging 2.25–9 over those runs, and `2*pp`, 4–10) track
+   neither each other nor the optimum.  A flux-independent constant means
+   a missing factor in the rhs or in the orbit-area normalization; where
+   it belongs is untraced, so it rides on the rhs rather than being
+   folded into `S(E)`.  At the correct value the fan gives ~one level per
+   exact subband (`nLL/nEx ≈ 1.05` at 2/3); at the wrong value the Berry
+   parity signature above is smeared out entirely, so **a null result on
+   a sign test at the wrong λ is not evidence against the sign**.  See
+   "The Bmultiplier factor" in `semiclassical/doc_technical.md`.
 
 4. **Energy grid resolution**: The Onsager solver uses `argmin` over a
    discrete energy grid. With `kT=3 meV` broadening, energy grids coarser

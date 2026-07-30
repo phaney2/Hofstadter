@@ -75,7 +75,7 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `term_factors`  | [1 1 1] | Multiplicative factors for Onsager correction terms: `[BC_factor morb_factor chi_factor]` (see below) |
 | `susceptibility_datafile` | — | Path to susceptibility `.mat` file (for `onsager` stage with `chiflag=1`) |
 | `gfactor`       | 1       | Orbital moment prefactor for `onsager_bfield`: E_mod = E_K + gfactor×B×Lz_K |
-| `onsager_Bmultiplier` | 1 | Multiplicative factor on B in the Onsager rhs (`onsager_bfield` only). Diagnostic/testing parameter. |
+| `onsager_Bmultiplier` | 4 | Multiplicative factor `λ` on B in the Onsager rhs. Not a free knob — 4 is the value set by comparison against the exact Hofstadter spectrum (see below). |
 | `lifshitz_threshold` | 50 | Lifshitz transition detection: a jump in orbit area is flagged when `|ΔA|` exceeds this factor × median `|ΔA|`. Each monotonic segment is solved independently. |
 | `outputfile`    | auto    | Output filename; defaults to `electronic_structure_data_{nk1}.mat` |
 
@@ -84,8 +84,8 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 The Onsager quantization condition solved by the code is:
 
 ```
-S(E)/(2π)² = (|B|/φ₀) × [ (n + ½)
-                          + BC_factor   × sign(B)·Φ_B/(2π)
+S(E)/(2π)² = (|B|/φ₀) × [ λ × (n + ½)
+                          − BC_factor   × sign(B)·Φ_B/(2π)
                           − morb_factor × (dL/dE)/(2π)
                           − chi_factor  × (2π)·(dχ/dE)·B/φ₀ ]
 ```
@@ -93,26 +93,34 @@ S(E)/(2π)² = (|B|/φ₀) × [ (n + ½)
 where `S(E)` is the orbit area in k-space, `Φ_B` is the enclosed Berry
 curvature, `dL/dE` is the energy derivative of the orbital moment, and
 `dχ/dE` is the Fukuyama susceptibility derivative. `φ₀ = 2πℏ/e` is the
-flux quantum.  Comparing with the textbook form
+flux quantum, and `λ ≡ onsager_Bmultiplier` (default 4, see below).
+Comparing with the textbook form
 `S/(2π)² = (|B|/φ₀)(n + ½ − φ_B/2π)` identifies the Berry phase as
-`φ_B = −sign(B)·BC_factor·Φ_B`.
+`φ_B = +sign(B)·BC_factor·Φ_B`.
 
 **Sign of the Berry curvature term.** `Φ_B` is computed as the flux of
 `Oz` through the orbit interior, which is orientation-independent (the
 interior is selected by point-in-polygon, not by contour winding).  The
 Onsager phase, however, is the Berry phase accumulated *along the
-direction of motion*, and `ℏk̇ = −e v×B` sends the k-orbit clockwise for
-charge `−e` at `B > 0` and counterclockwise at `B < 0`.  So `φ_B` is
-**odd in B**: `φ_B = −sign(B)·Φ_B`.  Every other term in the bracket
-above is even in `B`; only this one carries `sign(B)`.
+direction of motion*, and `ℏk̇ = −e v×B` reverses the traversal sense
+under `B → −B`.  So `φ_B` is **odd in B**: `φ_B = +sign(B)·Φ_B`.  Every
+other term in the bracket above is even in `B`; only this one carries
+`sign(B)`.  The parity is forced by the equation of motion.  The overall
+sign is fixed by validation against the exact Hofstadter spectrum, and
+agrees with the traversal argument (an electron-like orbit at `B > 0`
+runs counterclockwise, giving `φ_B = +Φ_B` by Stokes).  Code before
+2026-07-30 carried the opposite sign; fans generated with it need
+regenerating, or recomputing with `BC_factor = -1`.
 
 This matters whenever `Blist` contains both signs.  In `onsager_bfield`
 the field in `Blist` is the deviation `δB` from the background flux
 already built into the band structure, so `Blist` routinely straddles
-zero and both branches are exercised in a single run.  Validated against
-exact quantum σ_xy plateaus (at `B > 0`) and against the Hofstadter
-spectrum on both sides of `δB = 0` — see "Berry curvature sign" in the
-top-level `CLAUDE.md`.
+zero and both branches are exercised in a single run.  The sign was
+established by holding it fixed across both branches
+(`recompute_onsager.py --bc-sign-mode fixed`) and scoring each branch
+against the exact spectrum, at `qq/pp` = 1/2, 1/3, 2/5 and 2/3 — see
+"Berry curvature sign" in the top-level `CLAUDE.md` and "Term signs" in
+`doc_technical.md`.
 
 `φ_B` is discontinuous at `B = 0`, which is harmless: the rhs vanishes
 there and no Landau level is defined.
@@ -142,9 +150,28 @@ third.
 
 | Factor         | Term | Physical origin |
 |---|---|---|
-| `BC_factor`    | `sign(B)·Φ_B/(2π)` | Enclosed Berry curvature — shifts the Maslov phase.  `BC_factor = 1` is the physically correct value (see sign note above); `BC_factor = -1` flips it |
+| `BC_factor`    | `−sign(B)·Φ_B/(2π)` | Enclosed Berry curvature — shifts the Maslov phase.  `BC_factor = 1` is the physically correct value (see sign note above); `BC_factor = -1` flips it |
 | `morb_factor`  | `−(dL/dE)/(2π)` | Orbital magnetic moment — energy shift of orbits in B |
 | `chi_factor`   | `−(2π)·(dχ/dE)·B/φ₀` | Fukuyama susceptibility — second-order B² correction |
+
+### The B multiplier (`onsager_Bmultiplier`)
+
+`λ` multiplies `B` in the right-hand side of the condition above.  It
+**defaults to 4**, and despite looking like a fudge factor it is not a
+free parameter: scanning it against the exact Hofstadter spectrum puts
+the optimum at 4 at every flux tested (`qq/pp` = 1/2, 1/3, 2/5, 2/3;
+folded and unfolded), while `vol_M/A_uc` ranges over 2.25–9 and `2·pp`
+over 4–10 across those same runs.  Both of those geometric candidates
+were tried and score worse.  A flux-independent constant means a missing
+factor in the rhs (equivalently, in the orbit-area normalization); where
+it belongs has not been traced, so it is carried explicitly here.
+
+At `λ = 4` the fan produces about one level per exact subband
+(`nLL/nEx ≈ 1.05`), and the Berry-phase sign test above discriminates by
+a factor of ~4; at other `λ` the sign signature is smeared out entirely.
+Change it only for testing.  It applies to both the `onsager` and
+`onsager_bfield` stages, and it does not enter the modified dispersion,
+so it cannot affect the band structure or `Oz`.
 
 ### Example input file
 
@@ -226,7 +253,7 @@ Blist = linspace(0,12,50)
 nmax = 30
 nE = 200
 gfactor = 1
-onsager_Bmultiplier = 1
+onsager_Bmultiplier = 4
 ```
 
 This mode branches directly from bandstructure output (not isoenergy).
@@ -334,7 +361,7 @@ Fan file (`outputfile`), nested under `results` as usual:
 | `nE`                      | scalar                | —       | Energy points per band |
 | `nbands`                  | scalar                | —       | Number of bands |
 | `gfactor`                 | scalar                | —       | Orbital moment prefactor |
-| `onsager_Bmultiplier`     | scalar                | —       | B multiplier in Onsager rhs (diagnostic) |
+| `onsager_Bmultiplier`     | scalar                | —       | B multiplier `λ` in Onsager rhs |
 | `LL_{v}_band{n}_SM`       | (nB, nmax+1)          | meV     | LL from area (morb in dispersion) |
 | `LL_{v}_band{n}_SBM`      | (nB, nmax+1)          | meV     | + enclosed BC |
 
@@ -371,6 +398,11 @@ python recompute_onsager.py onsager_12_2_detail.mat \
 # both BC signs side by side in one file
 python recompute_onsager.py onsager_12_2_detail.mat \
        --ref onsager_12_2.mat --bc-factor 1,-1 --out onsager_12_2_bcsign.mat
+
+# same, but with the B-parity switched off, so each field branch can be
+# scored against the exact spectrum independently
+python recompute_onsager.py onsager_25_10_unfold_detail.mat \
+       --bc-sign-mode fixed --bc-factor 1,-1 --out bcfixed.mat
 ```
 
 | Option | Default | Description |
@@ -379,8 +411,9 @@ python recompute_onsager.py onsager_12_2_detail.mat \
 | `--ref FILE` | none | original fan `.mat`; supplies `nmax` and `onsager_Bmultiplier`, and every recomputed band is diffed against it |
 | `--out FILE` | `<base>_recomp.mat` | output file; `none` to compare without writing |
 | `--bc-factor` | `1` | comma-separated Berry curvature prefactors (= `term_factors[0]`) |
+| `--bc-sign-mode` | `odd` | parity of the Berry phase in `B`.  `odd` is the production convention (phase shift carries `sign(B)`); `fixed` uses the same sign on both field branches |
 | `--nmax` | from `--ref`, else 50 | maximum LL index |
-| `--Bmultiplier` | from `--ref`, else 1 | B multiplier in the rhs |
+| `--Bmultiplier` | from `--ref`, else 4 | B multiplier `λ` in the rhs |
 | `--lifshitz-threshold` | 50 | segment-splitting threshold |
 | `--bands`, `--valleys` | all | restrict the recompute |
 | `--in-memory` | off | load the whole detail file at once (faster, needs several GB) |
@@ -390,14 +423,21 @@ exactly (`LL_{v}_band{n}_SM`, `..._SBM`, plus `_seg{i}` variants).  With
 several, `_bcf0`, `_bcf1`, ... are appended in the order given and the
 values are recorded in `bc_factors`.  Note that the `SM` (area-only)
 levels are identical across BC factors by construction — only `SBM`
-responds.
+responds.  `bc_sign_mode` is recorded in both `results` and `params`.
+
+`--bc-sign-mode fixed` needs no change to the solver: since
+`B = sign(B)·|B|`, passing a per-field `f·sign(B)` is algebraically the
+same as replacing `|B|` with `B` in the Berry term.  It is a diagnostic
+for the sign question above; production fans use `odd`.
 
 The round trip is bit-exact: rebuilding a fan from its own detail file
 reproduces it to max |diff| = 0 with no NaN-pattern mismatches (verified
 on `onsager_12_2.mat`, 13 bands × 2 valleys × 200 B, and on
-`onsager_12_4.mat`, 90 B).  Note that fan files written **before** the
-Berry curvature sign fix will differ in `SBM` — recompute those with
-`--bc-factor -1` to reproduce them, or just regenerate them.
+`onsager_12_4.mat`, 90 B).  Note that fan files written **before
+2026-07-30** predate the Berry curvature sign flip and the `λ = 4`
+default, so their `SB`/`SBM`/`SBMC` levels will not reproduce under the
+current defaults — recompute with `--bc-factor -1 --Bmultiplier <old λ>`
+to match them, or regenerate.
 
 ## Post-processing pipeline
 

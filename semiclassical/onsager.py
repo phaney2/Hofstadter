@@ -79,7 +79,7 @@ def _find_segments(tarea, lifshitz_threshold):
 
 def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
                      dChi_dE=None, term_factors=(1.0, 1.0, 1.0),
-                     Bmultiplier=1.0, lifshitz_threshold=50):
+                     Bmultiplier=4.0, lifshitz_threshold=50):
     """
     Solve the Onsager quantization condition for one band.
 
@@ -115,7 +115,17 @@ def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
         on the BC, dL/dE, and chi' terms.  Default (1,1,1).
     Bmultiplier : float
         Multiplicative factor on B in the rhs of the Onsager condition.
-        Default 1.0.  Diagnostic/testing parameter.
+        Default 4.0.  This is NOT a free knob: comparison against the exact
+        Hofstadter spectrum at four fluxes (1/2, 1/3, 2/5, 2/3; folded and
+        unfolded) puts the optimum at 4 in every case, while the two
+        geometric candidates -- vol_M/A_uc (2.25 to 9 across those runs) and
+        2*pp (4 to 10) -- track neither each other nor the optimum.  A
+        flux-independent constant means a missing factor in the rhs or in
+        the orbit-area normalization; where exactly it belongs has not been
+        traced, so it is carried here rather than folded into S(E).  At the
+        correct value the fan produces about one level per exact subband
+        (nLL/nEx ~ 1.05 at 2/3); at the wrong value the Berry-phase parity
+        signature is smeared out entirely.
     lifshitz_threshold : float
         Area jump detection threshold: a jump is detected where |ΔA|
         exceeds this factor times the median |ΔA|.  Default 50.
@@ -166,12 +176,19 @@ def onsager_fan_band(Blist, nmax, E_levels, area, enclosedBC, dL_dE,
 
         # enclosedBC is the Berry curvature flux through the polygon interior
         # and carries no orientation, but the Onsager phase is the Berry
-        # phase along the direction of motion.  hbar*kdot = -e v x B sends
-        # the k-orbit clockwise for charge -e at B > 0 and counterclockwise
-        # at B < 0, so phi_B = -sign(B)*enclosedBC -- odd in B.  |B| here
+        # phase along the direction of motion.  hbar*kdot = -e v x B
+        # reverses the traversal sense under B -> -B, so phi_B is ODD in B
+        # while enclosedBC is not: phi_B = sign(B)*enclosedBC.  |B| here
         # (not B) is what makes it odd, since dividing the condition by
         # Bsign is what puts every other term on |B|.
-        base_SB = base_S + BC_factor * seg_BC[:, np.newaxis] * np.abs(B2) / (2 * np.pi * PHI0)
+        # The parity is forced by the equation of motion.  The leading minus
+        # is set by the exact Hofstadter spectrum at four fluxes (1/2, 1/3,
+        # 2/5, 2/3; folded and unfolded): holding the sign fixed across
+        # +/-dB, BC_factor=+1 fits dB<0 and BC_factor=-1 fits dB>0, and both
+        # correspond to -1 here.  It also agrees with the traversal argument
+        # (an electron-like orbit at B>0 runs counterclockwise, giving
+        # gamma_C = +Phi_B by Stokes) that the previous + contradicted.
+        base_SB = base_S - BC_factor * seg_BC[:, np.newaxis] * np.abs(B2) / (2 * np.pi * PHI0)
         result[f'SB{sfx}'] = _solve_onsager(rhs, base_SB, seg_valid, seg_E)
 
         base_SBM = base_SB - morb_factor * seg_dLdE[:, np.newaxis] * B2 / (2 * np.pi * PHI0)

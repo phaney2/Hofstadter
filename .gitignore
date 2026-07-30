@@ -29,6 +29,14 @@ semiclassical/test_*.py
 semiclassical/validate*.py
 dev_notes/
 
+# LaTeX build artifacts (keep the .tex sources)
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.pdf
+
 # Editor backup/undo files
 *~
 *.un~

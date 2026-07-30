@@ -314,9 +314,9 @@ approach. Orbit areas agree with MATLAB benchmark to machine precision.
 interior by point-in-polygon rather than by winding number.  So the
 contour orientation returned by `find_contours` — which is mixed CCW/CW
 across energies within a single band — never reaches `area` or
-`enclosedBC`.  The direction of traversal enters only as a fixed sign in
-the Onsager condition (see below); it is not, and must not be, inferred
-per orbit from the contour.
+`enclosedBC`.  The direction of traversal enters only as a single
+field-direction-dependent sign in the Onsager condition (see "Term
+signs"); it is not, and must not be, inferred per orbit from the contour.
 
 ## Parallelization
 
@@ -368,26 +368,38 @@ further suffixed with `_seg0`, `_seg1`, etc. (e.g. `LL_K_band5_SBM_seg1`).
 with `rhs = Bmultiplier·B·(n + ½)/φ₀` and `base` accumulated term by
 term.  `base_S` carries an explicit `-Bsign`, so dividing the whole
 condition by `sign(B)` puts every term on `|B|` and gives the readable
-form (`Bmultiplier = 1`):
+form (`λ ≡ Bmultiplier`, default 4 — see "The Bmultiplier factor"):
 
 ```
-S(E)/(2π)² = (|B|/φ₀)·[ (n + ½)
-                        + BC_factor  ·sign(B)·Φ_B/(2π)
+S(E)/(2π)² = (|B|/φ₀)·[ λ·(n + ½)
+                        − BC_factor  ·sign(B)·Φ_B/(2π)
                         − morb_factor·(dL/dE)/(2π)
                         − chi_factor ·(2π)·(dχ/dE)·B/φ₀ ]
 ```
 
 Against the textbook `S/(2π)² = (|B|/φ₀)(n + ½ − φ_B/2π)` this is
-`φ_B = −sign(B)·BC_factor·Φ_B`.
+`φ_B = +sign(B)·BC_factor·Φ_B`.
 
 The `sign(B)` on the Berry curvature term is the one non-obvious factor,
 and it is what `np.abs(B2)` in the source achieves — every other term
 uses `B2`.  `Φ_B` (`enclosedBC`) is the flux of `Oz` through the orbit
 interior with no orientation information attached (see "Isoenergy orbit
 detection"), whereas the Onsager phase is `φ_B = ∮ A·dk` taken *along the
-direction of motion*.  The equation of motion `ℏk̇ = −e v×B` sends the
-k-orbit clockwise for charge `−e` at `B > 0` and counterclockwise at
-`B < 0`, so `φ_B` is odd in `B` while `Φ_B` is not.
+direction of motion*.  The equation of motion `ℏk̇ = −e v×B` reverses the
+traversal sense under `B → −B`, so `φ_B` is odd in `B` while `Φ_B` is
+not.
+
+The **parity** follows from the equation of motion.  The **overall sign**
+is fixed by validation (b) below, and the two now agree with the
+traversal argument: for an electron-like orbit at `B > 0`, `ṙ ∝ ∇E`
+outward gives `k̇ ∝ (−k_y, k_x)` — counterclockwise — hence `φ_B = +Φ_B`
+by Stokes, which is what the bracket above yields.  Earlier versions of
+this code carried the opposite sign and documented it as empirical and in
+conflict with that argument.  The conflict is resolved: the traversal
+argument was right and the implementation was wrong.  The candidate
+resolutions once enumerated in `notes_onsager.tex` (a convention mismatch
+in the textbook form, a Diophantine effective-field sign, a hole-orbit
+area convention) are no longer needed.
 
 Two distinct things follow, and conflating them is the trap:
 
@@ -399,13 +411,31 @@ Two distinct things follow, and conflating them is the trap:
   `onsager_bfield`, where `Blist` holds the deviation `δB` from the
   background flux already contained in the band structure and its `Oz`.
 
-Validated three ways: (a) semiclassical Chern numbers from `Oz`
-reproduce the quantum σ_xy plateau steps band by band, fixing the
-`B > 0` branch; (b) `onsager_bfield` fans at `qq/pp = 1/2` track the
-exact Hofstadter spectrum across electron and hole subbands; (c) at
-`qq/pp = 1/3` over `δB ∈ [-2, 2] T` the solved fan matches
-`BC_factor = +1` for every `δB > 0` and `BC_factor = -1` for every
-`δB < 0` — 1436 LL keys, 25 386 finite entries, max |diff| = 0.
+Validated three ways:
+
+- **(a)** Semiclassical Chern numbers from `Oz` reproduce the quantum
+  σ_xy plateau steps band by band.  This constrains the sign of `Oz`
+  itself, *not* the sign of the Berry term in the quantization condition,
+  and is unaffected by the correction above.
+- **(b)** With the parity switched off — the same sign used on both
+  branches, via `recompute_onsager.py --bc-sign-mode fixed` — the exact
+  Hofstadter spectrum selects `BC_factor = +1` on `δB < 0` and
+  `BC_factor = -1` on `δB > 0`, at all four fluxes tested (`qq/pp` =
+  1/2, 1/3, 2/5, 2/3; folded and unfolded).  Both branches correspond to
+  the single odd-in-`B` convention above.  The discriminating feature is
+  not the residual magnitude but the *crossover*: the two curves swap
+  ranking exactly at the background field, which a fitting artifact would
+  not do.  Margins are 3.6×/3.9× at 1/2 and 3.8×/4.9× at 2/3, the latter
+  with median residuals of 0.099 and 0.083 meV.
+- **(c)** Recomputing a fan with the corrected default reproduces one
+  built by the old code at `BC_factor = -1` to max |diff| = 0 over all
+  bands and both valleys — a self-consistency check on the parity
+  plumbing only, not independent physical evidence.
+
+Note that (b) supersedes an earlier, weaker claim that `onsager_bfield`
+fans at `qq/pp = 1/2` "track the exact spectrum".  They do, but only
+per-branch quantitative scoring distinguishes the two candidate signs;
+a qualitative overlay does not.
 
 `φ_B` jumps at `B = 0`; harmless, since the rhs vanishes there and no
 level is defined.
@@ -418,6 +448,61 @@ identically zero in `onsager_bfield` (the orbital moment is already in
 the dispersion, correctly odd in `B` there), and the perturbative
 `onsager` channel has no negative-`B` validation, so it has been left
 alone.  Revisit before trusting perturbative-channel fans at `B < 0`.
+
+### The Bmultiplier factor
+
+`λ ≡ Bmultiplier` (`onsager_Bmultiplier`, `onsager.py`) multiplies `B` in
+the rhs.  It **defaults to 4**, and it is not a free knob.
+
+Scanning it against the exact Hofstadter spectrum puts the optimum at 4
+at every flux and geometry tested:
+
+| `qq/pp` | `pp,qq` | unfold | `vol_M/A_uc` | `2·pp` | λ optimal | symmetric residual (meV) |
+|---|---|---|---|---|---|---|
+| 1/2 | 2,1 | no  | 4.00 | 4  | 4   | 0.206 / 0.132 |
+| 1/3 | 3,1 | no  | 9.00 | 6  | 3–4 | 0.528 / 0.533 |
+| 2/5 | 5,2 | yes | 6.25 | 10 | 4   | 0.446 / 0.289 |
+| 2/3 | 3,2 | yes | 2.25 | 6  | 4   | 0.099 / 0.083 |
+
+The two residual columns are the `δB < 0` and `δB > 0` branches.  They
+are *not* comparable across rows — each row uses its own energy and `|δB|`
+window, and the fluxes differ in how many butterfly columns fall inside
+it — but the λ comparison within a row is meaningful.
+
+λ ≈ 4 holds while `vol_M/A_uc` ranges over 2.25–9 and `2·pp` over 4–10,
+folded and unfolded, so it is a flux-independent constant, not a geometry
+factor.  Both geometric candidates were tested and falsified: λ =
+`vol_M/A_uc` predicts 6.25 at 2/5 and 9 at 1/3, and λ = `2·pp` predicts
+10 at 2/5 and 6 at 1/3; all four score worse than 4.  That the numbers
+happen to coincide at `qq/pp = 1/2` is a coincidence of that flux.
+
+Two independent things happen at λ = 4 and nowhere else:
+
+- The level count comes out right.  `nLL/nEx ≈ 1.05` at 2/3 — about one
+  semiclassical level per exact subband.  This is a counting statement,
+  independent of any residual metric.
+- The Berry-phase parity becomes resolvable.  At λ = 2, 3, 5, 6 the two
+  candidate signs score within ~30% of each other on both branches with
+  no consistent pattern; at λ = 4 the margin is 3.8× and 4.9×.  A wrong
+  effective field smears the parity signature out entirely, so **a null
+  result on a sign test at the wrong λ is not evidence against the sign**.
+
+Where the factor actually belongs has not been traced.  Untraced
+candidates: the `qq/(2·pp)` primitive-vs-construction-cell flux
+convention (a factor of 2 applied twice — the leading suspect, since the
+semiclassical `B_bg = b0·(qq/pp)/2` already carries one such factor);
+`φ₀ = h/e` vs `h/2e`; and the shoelace/BZ normalization in
+`isoenergy.py` that feeds `S(E)`.  Until it is traced, the factor is
+carried explicitly on the rhs rather than folded into `S(E)`, so that the
+place it is being applied stays visible.  λ does not enter the modified
+dispersion in the non-perturbative channel, so it cannot contaminate the
+band structure or `Oz`.
+
+**Scoring caveat.**  The obvious metric — distance from each
+semiclassical level to the nearest exact subband centre — only penalizes
+*extra* levels, so it monotonically rewards a sparser fan and cannot
+compare different λ.  Use the symmetric two-way median (LL → exact and
+exact → LL) together with the level-count ratio `nLL/nEx`.
 
 ### Root-finding
 
@@ -469,8 +554,8 @@ E_mod(k) = E_K(k) + gfactor × B × Lz_K(k)
 
 Then computes isoenergy contours on E_mod, finds enclosed Berry curvature,
 and solves the Onsager condition. The rhs of the Onsager condition is
-`Bmultiplier × B × (n + ½) / φ₀`, where `Bmultiplier` defaults to 1
-(`onsager_Bmultiplier` input parameter; diagnostic/testing).
+`Bmultiplier × B × (n + ½) / φ₀`, where `Bmultiplier` defaults to 4
+(`onsager_Bmultiplier` input parameter) — see "The Bmultiplier factor".
 
 Since the orbital moment is already in the energy surface, output suffixes
 are `_SM` (area only, morb in dispersion) and `_SBM` (+ enclosed BC).
@@ -502,6 +587,19 @@ Its purpose is cheap prefactor sweeps: `--bc-factor` is `term_factors[0]`
 and accepts several values at once, so `--bc-factor 1,-1` puts both signs
 of the enclosed Berry curvature term in one output file (keys suffixed
 `_bcf0`, `_bcf1`).  A 200-B, 13-band, 2-valley recompute takes ~10 s.
+
+`--bc-sign-mode {odd,fixed}` controls the *parity* of the Berry phase in
+`B`, independently of `--bc-factor`.  `odd` (default) is the production
+convention, in which the level shift carries `sign(B)`.  `fixed` applies
+the same sign on both field branches, so the two can be scored
+separately — this is the test that established the sign (validation (b)
+in "Term signs").  It needs no change to the solver: since
+`B = sign(B)·|B|`, handing the solver a per-field `f·sign(B)` is
+algebraically identical to replacing `|B|` with `B` in the `base_SB`
+line.  Diagnostic only; production fans should be generated with `odd`.
+
+`--Bmultiplier` defaults to the value stored in `--ref`, or to 4 when no
+reference is given, matching `onsager.py`.
 This is how the enclosed-BC sign was settled; it is also how to
 reproduce a fan file written before that fix (`--bc-factor -1`).
 

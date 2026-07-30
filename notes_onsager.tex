@@ -1,0 +1,766 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\newcommand{\eps}{\varepsilon}
+\newcommand{\BZ}{\mathrm{BZ}}
+\newcommand{\MBZ}{\mathrm{MBZ}}
+\newcommand{\Nk}{N_k}
+\newcommand{\Ang}{\text{\AA}}
+\newcommand{\Imag}{\operatorname{Im}}
+\newcommand{\kb}{\mathbf{k}}
+\newcommand{\rb}{\mathbf{r}}
+\newcommand{\Om}{\Omega}
+\newcommand{\Bfield}{B}
+\newcommand{\sgn}{\operatorname{sgn}}
+\newcommand{\Phib}{\Phi_{\!\Om}}
+\newcommand{\lB}{\ell_B}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{Semiclassical Onsager Quantization with Berry-Phase Corrections\\
+\large Conventions, signs, and numerical implementation}
+\author{Notes for internal reference}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+These notes fix every sign and normalization entering the semiclassical
+Landau-level (LL) fan calculation, and document how the Berry curvature
+that feeds it is computed.  The motivating problem is that the
+Berry-phase term in the Onsager relation had, in our implementation,
+both the wrong overall sign and the wrong parity in $\Bfield$.  The
+parity error is invisible for one-sided field ranges and was found by
+comparing a fan computed over $\delta\Bfield \in [-2,2]\,$T against the
+exact Hofstadter spectrum; the sign error survived even that, and was
+found only by scoring each field branch separately at four fluxes.  Both
+are now corrected.  What remains unexplained is a flux-independent
+factor of four in the right-hand side of the quantization condition,
+carried as the parameter $\lambda$.
+Sections~\ref{sec:bc}--\ref{sec:onsager}
+are the physics; Sec.~\ref{sec:numerics} is implementation;
+Sec.~\ref{sec:signs} is a summary table intended to survive into the
+supplementary information.  Section~\ref{sec:open} lists what is
+\emph{not} settled --- read it before quoting any of this in print.
+\end{abstract}
+
+\tableofcontents
+
+%======================================================================
+\section{Scope and notation}
+%======================================================================
+
+We consider a two-dimensional band structure $E_n(\kb)$ obtained either
+at zero field (moir\'e plane-wave expansion) or as the Hofstadter
+subbands of a system already at a background flux
+$\Bfield_0$.  In the second case the semiclassical field variable is the
+\emph{deviation} $\delta\Bfield$ from $\Bfield_0$, since $\Bfield_0$ is
+already encoded in the subband dispersion and in its Berry curvature.
+Throughout, $\Bfield$ denotes whichever field the semiclassical dynamics
+actually sees; in the code this is the contents of \code{Blist}, and it
+routinely takes both signs.
+
+The carrier charge is $q = -e$ with $e>0$.  The flux quantum is
+\begin{equation}
+  \phi_0 = \frac{2\pi\hbar}{e},
+  \qquad
+  \lB = \sqrt{\frac{\hbar}{e\abs{\Bfield}}}.
+\end{equation}
+Band index $n$, LL index $\nu$.  $S(E)$ is the $\kb$-space area of a
+closed constant-energy orbit.  $\Om_n(\kb)$ is the Berry curvature
+($z$-component; the code calls it \code{Oz}) and $m_n(\kb)$ the orbital
+magnetic moment (\code{Lz}, up to a prefactor collected below).
+
+%======================================================================
+\section{Berry curvature and orbital moment}\label{sec:bc}
+%======================================================================
+
+\subsection{Definitions}
+
+With the Berry connection defined as
+\begin{equation}\label{eq:connection}
+  \mathbf{A}_n(\kb) = i\braket{u_n(\kb)}{\grad_\kb u_n(\kb)},
+\end{equation}
+the Berry curvature is $\Om_n = \curl_\kb \mathbf{A}_n$, whose
+$z$-component is
+\begin{equation}\label{eq:curvature_def}
+  \Om_n^z
+  = i\Bigl( \braket{\partial_{k_x} u_n}{\partial_{k_y} u_n}
+          - \braket{\partial_{k_y} u_n}{\partial_{k_x} u_n} \Bigr)
+  = -2\,\Imag \braket{\partial_{k_x} u_n}{\partial_{k_y} u_n}.
+\end{equation}
+The Berry phase accumulated on a closed circuit $C$ is
+\begin{equation}\label{eq:berryphase}
+  \gamma_C = \oint_C \mathbf{A}_n \cdot d\kb ,
+\end{equation}
+and by Stokes' theorem $\gamma_C = +\int_{S_C} \Om_n^z\, d^2k$
+\emph{when $C$ is traversed counterclockwise}.  The orientation caveat is
+the entire subject of Sec.~\ref{sec:parity}; note it now.
+
+\subsection{Kubo (perturbative) form}
+
+Inserting $\ket{\partial_\mu u_n} = \sum_{m\neq n}
+\ket{u_m}\mel{u_m}{\partial_\mu H}{u_n}/(E_n - E_m)$ into
+Eq.~\eqref{eq:curvature_def} and writing the velocity operator as
+$v_\mu = \hbar^{-1}\partial_\mu H$ gives
+\begin{equation}\label{eq:Oz_kubo}
+  \boxed{\;
+  \Om_n^z(\kb) = -2\hbar^2 \sum_{m \neq n}
+  \frac{\Imag\bigl[ v^x_{nm}\, v^y_{mn} \bigr]}
+       {(E_n - E_m)^2 + \eta^2}
+  \;}
+\end{equation}
+and, for the orbital magnetic moment,
+\begin{equation}\label{eq:Lz_kubo}
+  \boxed{\;
+  L_n^z(\kb) = \hbar^2 \sum_{m \neq n}
+  \frac{(E_n - E_m)\,\Imag\bigl[ v^x_{nm}\, v^y_{mn} \bigr]}
+       {(E_n - E_m)^2 + \eta^2}
+  \;}
+\end{equation}
+with $v^\mu_{nm} = \mel{u_n}{v_\mu}{u_m}$ in the eigenbasis of
+$H(\kb)$.  The physical orbital moment is
+$m_n^z = (e/2\hbar)\,L_n^z$; the prefactor is applied where it is needed
+(Sec.~\ref{sec:bfield}) rather than being folded into the stored array.
+
+Three remarks:
+\begin{enumerate}
+\item Diagonal terms vanish identically. For Hermitian $v_x, v_y$ the
+  products $v^x_{nn} v^y_{nn}$ are real, so $\Imag[\cdot]=0$ and the
+  $m=n$ term can be included in the sum without harm --- which is what
+  the code does.
+\item $\eta$ (\code{eta\_kubo}, default $2\,$meV) regularizes the
+  degenerate denominator.  It is a numerical convenience, not a physical
+  broadening, and it is distinct from the moir\'e coupling $\eta$ and
+  from the transport $\Gamma$.  Individual band Chern numbers are only
+  meaningful when the band is isolated by gaps $\gg \eta$.
+\item The sum over $m$ is truncated to a window of \code{nremotebands}
+  states on either side of the target manifold.  Because the kernel
+  decays as $1/(E_n-E_m)^2$ this converges quickly, but it is the same
+  convergence issue as the \code{transport\_buffer} in the quantum
+  transport calculation and should be checked, not assumed.
+\end{enumerate}
+
+\subsection{Velocity operators}
+
+\subsubsection{Plane-wave (zero-field) basis}
+
+For the moir\'e Hamiltonian expanded in plane waves, $H(\kb)$ depends on
+$\kb$ analytically and
+\begin{equation}
+  v_\mu = \frac{1}{\hbar}\pdv{H}{k_\mu}.
+\end{equation}
+For the bilayer this is block-diagonal in the $\mathbf{Q}$-vector index:
+each Dirac block contributes $v_F \sigma_\mu/\hbar$, and the trigonal
+warping term $\gamma_3$ contributes an interlayer block
+$v^x_{TB} = -v_3 U_2/\hbar$, $v^y_{TB} = +i v_3 U_2 /\hbar$.  The moir\'e
+potential is $\kb$-independent in this basis and drops out of $v_\mu$.
+
+\subsubsection{Landau-level (Hofstadter) basis}\label{sec:vel_LL}
+
+In the LL basis the situation is subtler and is worth spelling out,
+because the naive route fails.  The physical velocity is
+\begin{equation}
+  v = \frac{i}{\hbar}\,\comm{R}{H},
+\end{equation}
+with $R$ the position operator.  In the magnetic Bloch representation
+$R = i\,\partial_\kb + \mathbf{A}$, where $\mathbf{A}$ is the LL Berry
+connection, so
+\begin{equation}\label{eq:vel_general}
+  v = \frac{1}{\hbar}\Bigl( \pdv{H}{\kb} + i \comm{\mathbf{A}}{H} \Bigr).
+\end{equation}
+Now split $H = H_{\text{base}} + V_{\text{moir\'e}}$.  The moir\'e
+potential is a local function of position, so $\comm{R}{V_{\text{moir\'e}}}
+= 0$, i.e.
+\begin{equation}\label{eq:Vmoire_cancel}
+  \pdv{V_{\text{moir\'e}}}{\kb} + i\comm{\mathbf{A}}{V_{\text{moir\'e}}} = 0
+  \qquad\text{identically.}
+\end{equation}
+The BLG kinetic Hamiltonian $H_{\text{base}}$ carries no $\kb$
+dependence, so $\partial H_{\text{base}}/\partial \kb = 0$ and
+Eq.~\eqref{eq:vel_general} collapses to
+\begin{equation}\label{eq:vel_LL}
+  \boxed{\; v = \frac{i}{\hbar}\comm{\mathbf{A}}{H_{\text{base}}} \;}
+\end{equation}
+which is $\kb$-independent and can be precomputed once.
+
+\paragraph{Why not evaluate the two terms separately.}
+Equation~\eqref{eq:Vmoire_cancel} is an operator identity that requires
+\emph{completeness} of the LL basis.  In a basis truncated at $N$ it
+fails near the cutoff: $\partial V/\partial\kb$ and
+$i\comm{\mathbf{A}}{V}$ each have large matrix elements connecting to
+$\mathrm{LL}_N$, and their cancellation is spoiled.  Computing them
+separately and subtracting therefore injects truncation artifacts into
+$\Om_z$ precisely where the basis is least trustworthy.
+Equation~\eqref{eq:vel_LL} sidesteps this by never forming either term.
+
+\paragraph{The LL Berry connection.}
+$\mathbf{A}$ connects adjacent LLs through the ladder operators.  Within
+each sublattice ($s = A,B$) and each guiding-centre index, the nonzero
+upper-triangular elements are
+\begin{equation}\label{eq:ladder}
+  \mel{s,\nu}{A_x}{s,\nu+1} = -\,i\,\frac{\lB}{\sqrt{2}}\sqrt{\nu+1},
+  \qquad
+  \mel{s,\nu}{A_y}{s,\nu+1} = +\,\frac{\lB}{\sqrt{2}}\sqrt{\nu+1},
+\end{equation}
+and the matrices are then Hermitized, $\mathbf{A} \to \mathbf{A} +
+\mathbf{A}^\dagger$.  Both valleys use the same expression; they differ
+only in which sublattice's top LL is chopped (Sec.~\ref{sec:chop}).
+
+\paragraph{Gauge invariance.}
+$\Om_z$ built from Eq.~\eqref{eq:vel_LL} is independent of the choice of
+magnetic unit cell (square vs.\ triangular construction), which is a
+useful check: the Chern number per mesh cell comes out as $1/pp$ and
+integrates to an integer over the magnetic BZ.
+
+\subsubsection{Spurious-mode chopping}\label{sec:chop}
+
+In each valley one sublattice's highest LL has no coupling partner in
+the off-diagonal kinetic term, producing a spurious zero mode.  It is
+removed by deleting the corresponding rows and columns: the $(B,
+\mathrm{LL}_N)$ states in valley $K$, the $(A, \mathrm{LL}_N)$ states in
+valley $K'$.  The same deletion is applied to $H$, to $\mathbf{A}$, and
+inside the interlayer assembly, so all operators remain
+dimension-consistent.
+
+\subsection{Units}
+
+Internally $\Om_z$ is accumulated in $\Ang^2$ and $L_z$ in
+$\mathrm{eV}\,\Ang^2$; on output they are converted with
+$\Om_z \times 10^{-20} \to \mathrm{m}^2$ and
+$L_z \times 10^{-20}\times 10^{3} \to \mathrm{meV}\,\mathrm{m}^2$.
+Energies are parsed in meV, carried internally in eV, and returned in
+meV.  The $\eta$ in Eqs.~\eqref{eq:Oz_kubo}--\eqref{eq:Lz_kubo} is
+converted from meV to eV at read time.
+
+%======================================================================
+\section{The Onsager relation}\label{sec:onsager}
+%======================================================================
+
+\subsection{Semiclassical dynamics}
+
+The wavepacket equations of motion in band $n$ are
+\begin{align}
+  \dot{\rb} &= \frac{1}{\hbar}\pdv{E_n}{\kb} - \dot{\kb}\times \Om_n, \\
+  \hbar\dot{\kb} &= -e\,\dot{\rb}\times \mathbf{B},
+  \qquad \mathbf{B} = \Bfield\hat{z}.
+  \label{eq:eom_k}
+\end{align}
+Writing Eq.~\eqref{eq:eom_k} in components,
+\begin{equation}\label{eq:eom_components}
+  \hbar \dot{k}_x = -e\Bfield\,\dot{y},
+  \qquad
+  \hbar \dot{k}_y = +e\Bfield\,\dot{x}.
+\end{equation}
+The orbit is a constant-energy contour; what matters below is the
+\emph{sense} in which it is traversed, which Eq.~\eqref{eq:eom_components}
+shows is reversed under $\Bfield \to -\Bfield$.
+
+\subsection{Quantization condition}
+
+Onsager--Lifshitz quantization of the cyclotron orbit, including the
+Berry phase $\gamma_C$ of Eq.~\eqref{eq:berryphase} and the Maslov index
+$1/2$, reads
+\begin{equation}\label{eq:onsager_textbook}
+  S(E)\,\lB^2 = 2\pi\Bigl( \nu + \tfrac12 - \frac{\gamma_C}{2\pi} \Bigr),
+  \qquad \nu = 0,1,2,\dots
+\end{equation}
+or equivalently, using $\lB^{-2} = e\abs{\Bfield}/\hbar$ and
+$\phi_0 = 2\pi\hbar/e$,
+\begin{equation}\label{eq:onsager_phi0}
+  \frac{S(E)}{(2\pi)^2}
+  = \frac{\abs{\Bfield}}{\phi_0}
+    \Bigl( \nu + \tfrac12 - \frac{\gamma_C}{2\pi} \Bigr).
+\end{equation}
+Equation~\eqref{eq:onsager_phi0} is the form the code solves, and every
+correction term below is a additive contribution inside the bracket.
+
+\subsection{The Berry-phase term and its parity in \texorpdfstring{$\Bfield$}{B}}
+\label{sec:parity}
+
+This is the delicate part.  Define the \emph{enclosed Berry flux}
+\begin{equation}\label{eq:Phib}
+  \Phib(E) \;=\; \int_{S_C} \Om_n^z(\kb)\, d^2k ,
+\end{equation}
+the integral of the curvature over the orbit \emph{interior}.  Note
+carefully what $\Phib$ is and is not:
+\begin{itemize}
+\item It is a property of the region enclosed by the contour.  It has
+  \emph{no orientation attached}: the interior is a set of points, not a
+  circuit.
+\item It is therefore \emph{not} the Berry phase.  The Berry phase
+  $\gamma_C$ is a line integral along a directed circuit, and by Stokes'
+  theorem $\gamma_C = \pm\Phib$ with the sign set by the traversal sense.
+\end{itemize}
+Since Eq.~\eqref{eq:eom_components} reverses the traversal sense under
+$\Bfield \to -\Bfield$ while Eq.~\eqref{eq:Phib} is manifestly
+independent of $\Bfield$'s sign at fixed orbit, we have the central
+structural result:
+\begin{equation}\label{eq:parity}
+  \boxed{\;\gamma_C = +\,\sgn(\Bfield)\,\Phib
+  \quad\Longrightarrow\quad
+  \gamma_C \text{ is \emph{odd} in } \Bfield. \;}
+\end{equation}
+Every other term in the bracket of Eq.~\eqref{eq:onsager_phi0} is even in
+$\Bfield$.  The \emph{parity} is not a convention but a consequence of
+Eq.~\eqref{eq:eom_components}, and it is what the numerical evidence most
+sharply confirms.  The overall sign follows from the traversal sense: for
+an electron-like orbit at $\Bfield > 0$, $\dot{\rb} \propto \grad_\kb E$
+points outward and Eq.~\eqref{eq:eom_components} gives $\dot\kb \propto
+(-k_y, k_x)$, i.e.\ counterclockwise, so $\gamma_C = +\Phib$ by Stokes.
+It is independently confirmed by the exact Hofstadter spectrum at four
+fluxes (Sec.~\ref{sec:validation}).  Earlier versions of this note and of
+the code carried a minus here, in conflict with the traversal argument;
+that conflict is resolved in favour of Eq.~\eqref{eq:parity} as written.
+
+Two corollaries that are easy to conflate and must not be:
+\begin{description}
+\item[The sign is not per-orbit.] It follows from the carrier charge and
+  the field direction, both global.  It does \emph{not} flip between
+  electron-like and hole-like orbits, and it must never be inferred from
+  the winding of a numerically extracted contour.
+\item[The sign is per-field-direction.] A field list straddling zero
+  requires both branches within a single calculation.
+\end{description}
+$\gamma_C$ is discontinuous at $\Bfield = 0$.  This is harmless: the
+right-hand side of Eq.~\eqref{eq:onsager_phi0} vanishes there and no
+Landau level is defined.
+
+\subsection{Orbital moment and susceptibility corrections}
+
+Two further corrections are carried, both even in $\Bfield$ inside the
+bracket as currently implemented:
+\begin{equation}
+  \text{(orbital moment)}\quad -\frac{1}{2\pi}\dv{L}{E},
+  \qquad
+  \text{(Fukuyama susceptibility)}\quad
+  -\,2\pi\,\dv{\chi}{E}\,\frac{\Bfield}{\phi_0}.
+\end{equation}
+The $\chi$ term descends from a $\Bfield^2$ energy correction, so its
+linear-in-$\Bfield$ appearance in the bracket is expected.  The
+$dL/dE$ term is flagged in Sec.~\ref{sec:open}.
+
+\subsection{Form as implemented}
+
+Collecting everything, with dimensionless prefactors $c_\Om, c_L,
+c_\chi$ exposed as the input parameter \code{term\_factors}:
+\begin{equation}\label{eq:implemented}
+  \boxed{\;
+  \frac{S(E)}{(2\pi)^2}
+  = \frac{\abs{\Bfield}}{\phi_0}
+  \left[
+    \lambda\Bigl(\nu + \tfrac12\Bigr)
+    - c_\Om\,\frac{\sgn(\Bfield)\,\Phib}{2\pi}
+    - c_L\,\frac{1}{2\pi}\dv{L}{E}
+    - c_\chi\, 2\pi \dv{\chi}{E}\frac{\Bfield}{\phi_0}
+  \right]
+  \;}
+\end{equation}
+Comparing with Eq.~\eqref{eq:onsager_phi0} identifies
+$\gamma_C = +\sgn(\Bfield)\,c_\Om \Phib$, consistent with
+Eq.~\eqref{eq:parity} at the default $c_\Om = 1$.
+
+In the source, the residual is assembled as
+$\mathrm{rhs} + \mathrm{base}$ with
+$\mathrm{rhs} = \lambda\Bfield(\nu+\tfrac12)/\phi_0$ and \code{base\_S}
+carrying an explicit $-\sgn(\Bfield)$; dividing through by
+$\sgn(\Bfield)$ is what puts every term on $\abs{\Bfield}$ and produces
+Eq.~\eqref{eq:implemented}.  The $\sgn(\Bfield)$ on the curvature term is
+implemented as $\abs{\Bfield}$ in \code{base\_SB} where all other terms
+use $\Bfield$ --- a one-character distinction that carries the whole of
+Eq.~\eqref{eq:parity}'s parity.  Its overall sign is the leading minus on
+that same line.
+
+The multiplier $\lambda$ in Eq.~\eqref{eq:implemented} is the input
+parameter \code{onsager\_Bmultiplier}, applied as
+$\mathrm{rhs} \to \lambda\,\Bfield(\nu+\tfrac12)/\phi_0$.  It defaults to
+$\lambda = 4$, for the reasons given in Sec.~\ref{sec:lambda}.  It does
+\emph{not} enter the modified dispersion of Sec.~\ref{sec:bfield}, so it
+cannot affect the band structure or $\Om^z$.
+
+\subsection{The multiplier \texorpdfstring{$\lambda$}{lambda}}
+\label{sec:lambda}
+
+With $\lambda = 1$ --- the form Eq.~\eqref{eq:onsager_phi0} actually
+derives --- the computed fan is too sparse by roughly a factor of four
+relative to the exact Hofstadter spectrum.  Scanning $\lambda$ against
+that spectrum puts the optimum at $4$ at every flux and geometry tested:
+
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+$q/p$ & $p,q$ & unfolded & $v_M/A_{uc}$ & $2p$ & $\lambda_{\rm opt}$ \\
+\midrule
+$1/2$ & 2,1 & no  & 4.00 & 4  & 4 \\
+$1/3$ & 3,1 & no  & 9.00 & 6  & 3--4 \\
+$2/5$ & 5,2 & yes & 6.25 & 10 & 4 \\
+$2/3$ & 3,2 & yes & 2.25 & 6  & 4 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+$\lambda \approx 4$ holds while $v_M/A_{uc}$ ranges over $2.25$--$9$ and
+$2p$ over $4$--$10$, folded and unfolded.  Both of those geometric
+candidates were tested explicitly and score worse than $4$ at $2/5$ and
+$1/3$.  A flux-independent constant is not a geometry factor: it is a
+missing numerical factor in the right-hand side of
+Eq.~\eqref{eq:implemented}, or equivalently in the normalization of
+$S(E)$.  Two independent indicators single out $\lambda = 4$: the level
+count comes out at about one semiclassical level per exact subband
+($n_{\rm LL}/n_{\rm ex} \approx 1.05$ at $2/3$), and the sign test of
+Sec.~\ref{sec:validation} discriminates by a factor of $\sim\!4$, whereas
+at $\lambda = 2,3,5,6$ the two candidate signs score within ${\sim}30\%$
+of each other with no consistent pattern.
+
+Where the factor of four originates has not been traced; see
+Sec.~\ref{sec:open}.  Until it is, it is carried explicitly on the
+right-hand side rather than absorbed into $S(E)$, so that the place it is
+being applied remains visible.
+
+%======================================================================
+\section{Numerical implementation}\label{sec:numerics}
+%======================================================================
+
+\subsection{Mesh and normalization}
+
+The magnetic BZ is sampled on an $n_{k1}\times n_{k2}$ mesh with
+$\Nk = n_{k1}n_{k2}$.  Flattening uses Fortran (column-major) order
+throughout, matching the original MATLAB implementation.  With
+$\mathrm{vol}_M$ the real-space moir\'e cell area,
+\begin{equation}
+  A_\BZ = \frac{(2\pi)^2}{\mathrm{vol}_M},
+  \qquad
+  a_{\text{cell}} = \frac{A_\BZ}{\Nk},
+  \qquad
+  w_k \equiv \frac{(2\pi)^2}{\Nk\,\mathrm{vol}_M} = a_{\text{cell}} .
+\end{equation}
+In Hofstadter mode $\mathrm{vol}_M = pp^2\,A_{uc}/(2qq)$ with
+$A_{uc} = \sqrt{3}L^2 = 2A_{\text{prim}}$ the doubled (rectangular)
+construction cell; equivalently
+$A_\BZ = qq\,(2\pi)^2/(pp^2 A_{\text{prim}})$.  The flux per
+\emph{primitive} moir\'e cell is $qq/(2pp)$ flux quanta, \emph{not}
+$qq/pp$.
+
+\subsection{Orbit detection}
+
+For each band and each energy level $E_i$:
+\begin{enumerate}
+\item Reshape $E(\kb)$ to the 2D mesh and tile it $3\times 3$ so that
+  orbits crossing the zone boundary close properly.
+\item Run marching squares (\code{skimage.measure.find\_contours}) at
+  level $E_i$.
+\item Discard open contours (endpoints separated by more than one pixel)
+  and contours with fewer than 4 vertices; close the remainder.
+\item Deduplicate the $3\times3$ tiling by keeping only contours whose
+  centroid lies in the central tile.
+\item Compute the area by the shoelace formula and convert
+  pixel$^2 \to k$-space via $a_{\text{cell}}$.
+\item Reject areas below $a_{\text{cell}}$ (mesh noise) or above
+  $A_\BZ - a_{\text{cell}}$ (a contour that has wrapped the whole zone).
+\item Identify interior mesh points with
+  \code{matplotlib.path.Path.contains\_points}, map tiled indices back
+  to the primitive zone by modulo, and linearize in F-order.
+\end{enumerate}
+Multiple pockets at the same energy are retained and sorted by
+descending area; the solver uses the dominant (largest) pocket.
+
+\subsection{Enclosed Berry flux}
+
+Equation~\eqref{eq:Phib} is evaluated as a plain mesh sum over the
+interior points identified above,
+\begin{equation}\label{eq:Phib_numeric}
+  \Phib(E_i) = w_k \sum_{\kb \,\in\, \text{interior}} \Om_n^z(\kb),
+\end{equation}
+and the orbital-moment derivative as a Fermi-broadened mesh sum,
+\begin{equation}
+  \dv{L}{E}(E_i) = w_k \sum_{\kb} f'(E_n(\kb) - E_i)\, L_n^z(\kb),
+  \qquad
+  f'(\Delta) = \frac{e^{-\abs{x}}}{k_BT\,(1+e^{-\abs{x}})^2},
+  \quad x = \frac{\Delta}{k_BT},
+\end{equation}
+with $k_BT$ the input parameter \code{kT} (default $3\,$meV).  The
+$\abs{x}$ form is the numerically stable way to write
+$\mathrm{sech}^2$.
+
+\subsection{Orientation independence, and why it matters}
+\label{sec:orientation}
+
+Both of the quantities extracted above are orientation-blind by
+construction:
+\begin{itemize}
+\item \code{\_shoelace\_area} takes $\abs{\cdot}$ of the signed shoelace
+  sum, so the area is positive regardless of winding.
+\item The interior is selected by point-in-polygon containment, not by a
+  winding number, so Eq.~\eqref{eq:Phib_numeric} is likewise
+  orientation-blind.
+\end{itemize}
+The orientation returned by marching squares is in fact mixed --- a
+census over a single band finds both senses at different energies, with
+no physical meaning: it reflects the contouring algorithm's internal
+bookkeeping, not the direction of semiclassical motion.
+
+The consequence is important and is the design decision worth stating
+explicitly in any writeup: \textbf{the traversal sense is supplied
+analytically, as the $\sgn(\Bfield)$ of Eq.~\eqref{eq:parity}, and is
+never read off the numerics.}  Attempting to recover it from contour
+winding would be both wrong (the winding is an artifact) and
+unnecessary (the physical answer is a global function of $\sgn\Bfield$).
+
+\subsection{Lifshitz segmentation}
+
+When $S(E)$ is non-monotonic --- small pockets growing through a
+Lifshitz transition into a large orbit that then shrinks --- the
+quantization condition can have several roots at the same
+$(\Bfield,\nu)$.  Since the solver returns one root per $(\Bfield,\nu)$,
+the energy grid is first split into monotonic segments.
+
+Detection is by magnitude: a transition is flagged wherever
+$\abs{\Delta S}$ between adjacent grid points exceeds
+$\texttt{lifshitz\_threshold}$ (default $50$) times the median
+$\abs{\Delta S}$.  Each segment is solved independently and output keys
+acquire a \code{\_seg}$i$ suffix.  This heuristic works but is
+admittedly arbitrary; splitting instead at sign changes of $dS/dE$ would
+be parameter-free and more physical, at the cost of sensitivity to noise
+in $S(E)$.
+
+\subsection{Root finding}
+
+For each $(\Bfield, \nu)$ the residual of Eq.~\eqref{eq:implemented} is
+evaluated on the segment's energy grid and rooted by:
+\begin{enumerate}
+\item \textbf{Sign-change interpolation} (primary): locate the first
+  adjacent pair of grid points bracketing a sign change and interpolate
+  linearly.  This gives continuous $E_\nu(\Bfield)$ curves even where
+  $S(E)$ varies steeply, because the root need only fall \emph{between}
+  grid points.
+\item \textbf{Thresholded \code{argmin}} (fallback): where no sign change
+  exists, take the grid point of smallest $\abs{\text{residual}}$ and
+  reject it as \code{NaN} if that residual exceeds
+  $r_{\text{tol}} = 5\%$ of $\abs{\Bfield}(\nu+\tfrac12)/\phi_0$.  This
+  suppresses spurious levels at saddle energies where $S(E)$ has a
+  maximum but the condition is never actually satisfied.
+\end{enumerate}
+Energies with zero orbit area are assigned an infinite residual so they
+can never be selected --- a deliberate difference from the original
+MATLAB implementation, which evaluated the condition at all energies and
+could pick up spurious minima driven by the $dL/dE$ term in regions with
+no orbit at all.
+
+Grid resolution matters: with $k_BT = 3\,$meV broadening, energy grids
+coarser than ${\sim}2\,$meV produce one-bin LL shifts.  A dedicated
+denser grid (\code{elist\_onsager}) is available for this reason.
+
+%======================================================================
+\section{Non-perturbative field channel}\label{sec:bfield}
+%======================================================================
+
+The perturbative treatment folds the orbital moment in through
+$dL/dE$.  An alternative --- and the channel used for the Hofstadter
+comparisons --- is to put it directly into the dispersion.  At each
+field,
+\begin{equation}\label{eq:Emod}
+  E^{\text{mod}}_n(\kb;\Bfield)
+  = E_n(\kb) + g\,\Bfield\,\frac{e}{2\hbar}\,L_n^z(\kb),
+\end{equation}
+with $g$ the input parameter \code{gfactor}.  Contours, areas and
+enclosed fluxes are then recomputed on $E^{\text{mod}}$ at every field
+value, and the quantization condition is solved with $dL/dE \equiv 0$.
+
+Consequences worth noting:
+\begin{itemize}
+\item Output labels change: the two cumulative sets are \code{\_SM}
+  (area only, moment already in the dispersion) and \code{\_SBM} (plus
+  enclosed curvature).  The solver's own \code{S}/\code{SB} outputs are
+  renamed accordingly.
+\item \code{term\_factors} is read as \emph{two} elements here,
+  $[c_\Om\; c_\chi]$, and expanded internally to $(c_\Om, 0, c_\chi)$.
+  A third element is silently ignored, since $c_L$ would multiply an
+  identically zero array.
+\item Equation~\eqref{eq:Emod} is manifestly odd in $\Bfield$, as it
+  must be, and \code{onsager\_Bmultiplier} does \emph{not} appear in it.
+\item Because contours must be re-found at every field, this channel is
+  far more expensive than the perturbative one.  Intermediate data ---
+  \code{Blist}, and per-band \code{area}, \code{enclosedBC},
+  \code{E\_levels} arrays --- are therefore written to a separate
+  \code{*\_detail.mat}.  These four arrays are the complete input to the
+  quantization step, so the fan can be re-solved from them in seconds
+  with different prefactors.  This is how the sign question was settled.
+\end{itemize}
+
+%======================================================================
+\section{Validation}\label{sec:validation}
+%======================================================================
+
+Three checks, addressing different pieces.
+
+\paragraph{(a) $\Om_z$ itself, via $\sigma_{xy}$.}
+Semiclassical Chern numbers $C_n = w_k\sum_\kb \Om_n^z/2\pi$ were
+compared against the plateau steps of the exact Kubo $\sigma_{xy}(\mu)$
+from the quantum Hofstadter calculation at $qq/pp = 1/2$.  Bands 5--11
+map one-to-one onto quantum subbands with $C_n = \Delta\sigma_{xy}$
+agreeing to three decimals in every case.  This fixes the sign and
+normalization of Eq.~\eqref{eq:Oz_kubo}.  Note that it constrains
+$\Om_z$, \emph{not} the sign of the Berry term in the quantization
+condition, so it is silent on Eq.~\eqref{eq:parity}.
+
+\paragraph{(b) Overall sign, via a fixed-parity scan on both branches.}
+This is the determination.  The recomputation utility can switch the
+$\Bfield$-parity of the curvature term off, applying the same $c_\Om$ on
+both field branches; because $\Bfield = \sgn(\Bfield)\abs{\Bfield}$, this
+is achieved by handing the solver $c_\Om \sgn(\Bfield)$ per field point,
+with no change to the solver itself.  Each branch can then be scored
+against the exact Hofstadter spectrum independently.  At all four fluxes
+tested --- $qq/pp = 1/2,\,1/3,\,2/5,\,2/3$, folded and unfolded --- the
+spectrum selects
+\begin{equation*}
+  c_\Om = +1 \ \text{on}\ \delta\Bfield < 0,
+  \qquad
+  c_\Om = -1 \ \text{on}\ \delta\Bfield > 0,
+\end{equation*}
+which is the single odd-in-$\Bfield$ convention of
+Eq.~\eqref{eq:parity} with $c_\Om = 1$.  The discriminating feature is
+not the residual magnitude but the \emph{crossover}: the two curves swap
+ranking exactly at the background field, which a fitting artifact would
+not do.  Both spike identically at the background field itself, as
+expected --- the right-hand side is proportional to $\delta\Bfield$, so
+all $\nu$ collapse to one energy there.  Margins are $3.6\times$ and
+$3.9\times$ at $1/2$ and $3.8\times$ and $4.9\times$ at $2/3$, the latter
+with median residuals of $0.099$ and $0.083$\,meV.  The scan is only
+meaningful at $\lambda = 4$ (Sec.~\ref{sec:lambda}).
+
+\paragraph{(c) Parity, self-consistency.}
+At $qq/pp = 1/3$ over $\delta\Bfield \in [-2,2]\,$T (200 fields, 13
+bands, both valleys), the fan solved with Eq.~\eqref{eq:implemented}
+reproduces the $c_\Om = +1$ result for \emph{every} $\delta\Bfield > 0$
+and the $c_\Om = -1$ result for \emph{every} $\delta\Bfield < 0$: 1436 LL
+arrays, 25\,386 finite entries, $\max\abs{\text{diff}} = 0$, no
+\code{NaN}-pattern mismatches.  This confirms that the parity is plumbed
+through the code as intended; it is not independent physical evidence.
+The same splice was verified on a synthetic band with analytically
+prescribed $S(E)$ and $\Phib(E)$.
+
+\paragraph{Historical note.}
+Two things made the earlier, incorrect sign hard to see.  A one-sided
+field range hides the parity entirely: a plot window of
+$[6.1, 11.8]\,$T against a background $\Bfield_0 = 11.555\,$T
+corresponds to $\delta\Bfield \in [-5.45, +0.25]\,$T --- essentially
+all negative --- so a uniform $c_\Om = -1$ appeared to work everywhere.
+And a qualitative overlay, even a two-sided one, does not separate the
+candidate signs; only the per-branch quantitative scoring of check (b)
+does.  Fan files produced before the correction are stale in \code{\_SB},
+\code{\_SBM} and \code{\_SBMC}.
+
+%======================================================================
+\section{Summary of sign conventions}\label{sec:signs}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Quantity & Convention & Where fixed \\
+\midrule
+Berry connection & $\mathbf{A} = i\braket{u}{\grad_\kb u}$
+  & Eq.~\eqref{eq:connection} \\
+Berry curvature & $\Om^z = -2\hbar^2\sum_m
+  \Imag[v^x_{nm}v^y_{mn}]/(\Delta E^2+\eta^2)$
+  & Eq.~\eqref{eq:Oz_kubo}; validated by $\sigma_{xy}$ \\
+Chern number & $C = w_k\sum_\kb \Om^z/2\pi$, $\sigma_{xy}=C\,e^2/h$
+  & check (a) \\
+Enclosed flux & $\Phib = \int_{\text{interior}}\Om^z d^2k$, no orientation
+  & Eq.~\eqref{eq:Phib}, Sec.~\ref{sec:orientation} \\
+Orbit area & $S = \abs{\text{shoelace}}$, always positive
+  & Sec.~\ref{sec:orientation} \\
+Berry phase & $\gamma_C = +\sgn(\Bfield)\,\Phib$ \quad(\emph{odd in} $\Bfield$)
+  & Eq.~\eqref{eq:parity}; traversal $+$ check (b) \\
+Maslov index & $+\tfrac12$ & Eq.~\eqref{eq:onsager_textbook} \\
+Multiplier & $\lambda = 4$ on the right-hand side
+  & Sec.~\ref{sec:lambda}; untraced \\
+Quantization & Eq.~\eqref{eq:implemented} & --- \\
+Orbital moment & $m^z = (e/2\hbar)L^z$, added as $+g\Bfield m^z$
+  & Eq.~\eqref{eq:Emod} \\
+\bottomrule
+\end{tabular}
+\caption{Every sign that enters the calculation, and what pins it.}
+\end{table}
+
+%======================================================================
+\section{Open issues}\label{sec:open}
+%======================================================================
+
+\paragraph{1. The multiplier $\lambda = 4$ is untraced.}
+This is now the most important caveat in these notes and must be
+resolved before publication.  Section~\ref{sec:lambda} establishes
+empirically that the right-hand side of Eq.~\eqref{eq:implemented} is
+short by a factor of four, and that the factor is flux-independent, but
+not \emph{where} the four comes from.  Candidates, none yet checked:
+\begin{itemize}
+\item The $qq/(2pp)$ primitive-versus-construction-cell flux convention.
+  A factor of two applied twice gives four, and the semiclassical
+  background field $\Bfield_0 = b_0 (qq/pp)/2$ already carries one such
+  factor.  This is the leading suspect.
+\item $\phi_0 = h/e$ versus $h/2e$ somewhere in the chain.
+\item The shoelace and BZ normalizations that produce $S(E)$ from the
+  contour, in \code{isoenergy.py}.
+\end{itemize}
+Until this is settled, Eq.~\eqref{eq:implemented} should be presented as
+a validated form with its validation stated, not as a derivation.
+
+\paragraph{1a. The overall sign in Eq.~\eqref{eq:parity} --- resolved.}
+Previous versions of these notes flagged the overall sign as empirical
+and in conflict with the traversal argument.  That conflict is closed:
+the traversal argument was right and the implementation was wrong.  The
+code has been corrected, so Eq.~\eqref{eq:parity} now reads
+$\gamma_C = +\sgn(\Bfield)\Phib$, which is simultaneously what the
+counterclockwise electron orbit at $\Bfield > 0$ gives by Stokes and what
+check (b) selects at all four fluxes.  The three candidate resolutions
+formerly listed here --- a mismatch with the textbook form, a
+Diophantine effective-field sign, a hole-orbit area convention --- are no
+longer needed.  Worth recording, though: the parity signature is only
+resolvable at the correct $\lambda$, so the two open questions were
+entangled, and a null result on the sign test at $\lambda = 1$ would have
+been uninformative rather than negative.
+
+\paragraph{2. Parity of the $dL/dE$ term is unverified.}
+As implemented, the orbital-moment correction is even in $\Bfield$
+inside the bracket of Eq.~\eqref{eq:implemented}.  If it descends from an
+orbit energy shift $\propto m\Bfield$ --- which is odd --- it should
+carry a $\sgn(\Bfield)$ exactly as the curvature term does.  This has
+\emph{not} been changed, because the term is identically zero in the
+non-perturbative channel (Sec.~\ref{sec:bfield}) and the perturbative
+channel has no negative-field validation to test against.  Do not trust
+perturbative-channel fans at $\Bfield<0$ until this is resolved.
+
+\paragraph{3. Lifshitz threshold is a heuristic.}
+See Sec.~\ref{sec:numerics}.  May need retuning in other parameter
+regimes.
+
+\paragraph{4. Stale data.}
+Fan files generated before the curvature-sign correction and the change
+of the $\lambda$ default are wrong in their
+\code{SB}/\code{SBM}/\code{SBMC} arrays.  The \code{S}/\code{SM} arrays
+are unaffected by the sign but do move with $\lambda$.  Regenerate, or
+re-solve from the corresponding \code{*\_detail.mat}.
+
+%======================================================================
+\section*{Note on paring down for supplementary information}
+%======================================================================
+
+For the SI, the minimal self-contained set is:
+Eqs.~\eqref{eq:connection}, \eqref{eq:Oz_kubo}, \eqref{eq:vel_LL},
+\eqref{eq:ladder}, \eqref{eq:Phib}, \eqref{eq:parity},
+\eqref{eq:implemented}, plus the table in Sec.~\ref{sec:signs} and one
+paragraph each on orbit detection and orientation independence
+(Sec.~\ref{sec:orientation} is the non-obvious methodological point and
+is worth keeping).  Sections~\ref{sec:validation} and \ref{sec:open}
+should be compressed to a short validation paragraph --- but issue 1 in
+Sec.~\ref{sec:open}, the origin of $\lambda = 4$, needs to be
+\emph{resolved}, not merely compressed, before the SI is written.
+
+\end{document}
