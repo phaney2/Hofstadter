@@ -589,9 +589,28 @@ magnetic Bloch bands in a Landau level basis at rational flux qq/pp.
 | `eta`            | —     | Moire coupling parameter (passed to Hamiltonian construction) |
 | `eta_kubo`       | meV   | Broadening for Berry curvature Kubo sum (default: 2) |
 | `unfold`         | —     | 1 = unfold the doubled magnetic BZ after the k-loop (default: 0).  See below. |
+| `full_zone`      | —     | 1 = sample the qq-extended k-zone `[b1/pp, qq*b2/pp]` instead of the minimal zone `[b1/pp, gcd(2*pp,qq)*b2/pp]` (default: 0).  Identical k-averages at `qq/gcd(2*pp,qq)` times the cost; for regression tests. |
 
 Shared parameters (`nk1`, `nk2`, `bands`, `isparallel`, `outputfile`,
 `U`) work identically to zero-field mode.
+
+### Minimal k-zone
+
+The k-mesh spans `[b1/pp, qfac*b2/pp]` with `qfac = gcd(2*pp, qq)`, which
+is the smallest zone on which the spectrum, Berry curvature and velocity
+are periodic.  `nk2` therefore counts points across `qfac*b2/pp`, not
+`qq*b2/pp`.
+
+For most fluxes `qfac == qq` and this makes no difference — `(pp,qq)` =
+(1,1), (2,1), (3,1), (3,2), (5,2), (7,2), (9,6) all have `qfac == qq`.
+Where they differ, the qq-extended zone contains `qq/qfac` identical
+copies of the data along b2 and costs that factor more to compute.  The
+first such case is `(7,4)`, where `qfac = 2`: an output generated before
+this convention was adopted will show every band repeating exactly under
+`n2 -> n2 + nk2/2`.  Re-run it to get the correct mesh — the values
+themselves are right, there are just twice as many of them as needed.
+`vol_M` moves with the zone (`pp²·uc_area/(2·qfac)`), so `cell_area` and
+all orbit areas are unchanged.
 
 ### Hofstadter example input
 
@@ -628,7 +647,8 @@ kpoints, vol_M.
 
 ### Magnetic BZ unfolding (`unfold = 1`)
 
-For flux `qq/pp = 2/(odd)` the Landau gauge forces a rectangular
+When `gcd(2*pp, qq) == 2` with `pp` odd — flux `qq/pp = 2/(odd)`, and
+also cases like `(pp,qq) = (7,4)` — the Landau gauge forces a rectangular
 construction cell on a triangular moire lattice, and the magnetic BZ
 produced by the k-loop is a factor of two too small along G1.  Every
 physical band then appears as **two folded subbands** that overlap in
@@ -676,6 +696,12 @@ Two consequences worth knowing:
 - **Band count halves.** Request an even number of bands spanning
   complete pairs.  A `bands` window ending mid-pair loses its odd band
   to `unfold_dropped`.
+- **Detection needs a reasonably fine mesh.** The degeneracy-line fit
+  requires at least `min_frac` (0.9) of rows to contribute a clean
+  crossing.  At `(pp,qq) = (7,4)`, `nk1 = nk2 = 48` detects every pair
+  with `frac_rows = 1.000`; `nk1 = nk2 = 24` detects none.  If unfolding
+  reports zero pairs on a flux you expect to be folded, try a finer mesh
+  before concluding it is unfolded.
 - **Berry curvature on a degeneracy line is basis-dependent.** Where the
   two subbands are exactly degenerate, `Oz_lo` and `Oz_hi` are
   individually arbitrary (LAPACK returns some combination) and only their

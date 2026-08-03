@@ -1,15 +1,16 @@
 """
 Magnetic-BZ unfolding for folded Hofstadter band structures.
 
-For flux qq/pp = 2/(odd) the Landau gauge forces a rectangular construction
-cell on a triangular moire lattice, and the resulting magnetic BZ is a factor
-of two too small.  Each physical band then appears as two folded subbands that
+When qfac = gcd(2*pp, qq) is 2 and pp is odd (flux qq/pp = 2/(odd), and also
+e.g. (pp,qq) = (7,4)) the Landau gauge forces a rectangular construction cell
+on a triangular moire lattice, and the resulting magnetic BZ is a factor of
+two too small.  Each physical band then appears as two folded subbands that
 overlap in energy, never mix, and swap hi/lo ordering across lines of exact
 degeneracy.  Sorting by energy therefore produces two kinked, unphysical
 surfaces instead of one smooth band.
 
 Two degeneracy line families separate the subbands (fractional coordinates
-f1 = n1/nk1 along G1 = b1/pp, f2 = n2/nk2 along G2 = qq*b2/pp):
+f1 = n1/nk1 along G1 = b1/pp, f2 = n2/nk2 along G2 = qfac*b2/pp):
 
   family 1   f1 - f2 = d_off   (d_off = 1/2, symmetry-enforced)   direction G1+G2
   family 2   f2 = h_off        (h_off band-dependent)             direction G1

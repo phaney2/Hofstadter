@@ -43,7 +43,7 @@ bandstructure.py          # mode branching
   _do_calc_hofstadter       →  orchestrates Hofstadter k-loop
   do_calc                   →  branches on qq: if qq>0 → Hofstadter, else → zero-field
 
-unfold.py                 # magnetic BZ unfolding (opt-in, qq/pp = 2/odd)
+unfold.py                 # magnetic BZ unfolding (opt-in, gcd(2pp,qq) = 2, pp odd)
   analyze_pair              →  locate both degeneracy line families of a candidate pair
   branch_label              →  parity label on the (nk2, 2*nk1) doubled grid
   unfold_pair               →  select one branch of E / Oz / Lz
@@ -230,14 +230,36 @@ cell, use `qq/pp = 2` (e.g. qq=2, pp=1).
 
 ### Hofstadter mode — BZ normalization for Chern numbers
 
-The k-mesh vectors are `vb = [b1/pp, b2*qq/pp]` where b1, b2 are the
-primitive moire reciprocal lattice vectors. The b2 direction is qq times
-larger than b1/pp because the phase factors `exp(i*(pp/qq)*k·L)` require
-qq periods in b2 for the Hamiltonian to be periodic, while the chain
-structure already provides periodicity in b1 at the b1/pp spacing.
+The k-mesh vectors are `vb = [b1/pp, b2*qfac/pp]` with
+`qfac = gcd(2*pp, qq)`, where b1, b2 are the primitive moire reciprocal
+lattice vectors.  The b2 direction is longer than b1/pp because the phase
+factors `exp(i*(pp/qq)*k·L)` require several periods in b2 for the
+Hamiltonian to be periodic, while the chain structure already provides
+periodicity in b1 at the b1/pp spacing.
 
-The real-space area for BZ normalization is `vol_M = pp² × uc_area / (2*qq)`,
-giving `BZ_area = (2π)² / vol_M = qq × (2π)² / (pp² A_prim)`.
+`qfac`, not `qq`, is the minimal such period: all gauge-invariant
+quantities (spectrum, Berry kernel, |v|²) are exactly periodic under
+`qfac*b2/pp`.  The qq-extended zone therefore holds `qq/qfac` identical
+copies of the data.  This matches `main_v3.py`, which adopted the same
+minimal zone; set the input parameter `full_zone = 1` to restore the
+qq-extended zone (identical k-averages at `qq/qfac` times the cost).
+
+For most fluxes `qfac == qq` and nothing changes — `(pp,qq)` = (1,1),
+(2,1), (3,1), (3,2), (5,2), (7,2), (9,6) all have `qfac == qq`.  The
+first flux run here where they differ is `(7,4)`, with `qfac = 2` and a
+2× redundancy along b2.
+
+The real-space area for BZ normalization is
+`vol_M = pp² × uc_area / (2*qfac)`, giving
+`BZ_area = (2π)² / vol_M = qfac × (2π)² / (pp² A_prim)`.  Shrinking the
+zone and growing `vol_M` by the same factor leaves
+`cell_area = (2π)²/(vol_M · nk1 · nk2)` invariant, so orbit areas and
+Chern sums are unaffected.  Verified by `validate_zone.py`: at
+`(pp,qq) = (7,4)` the minimal run reproduces the corresponding full-zone
+k-points bit for bit (0.00e+00 in E, Oz, Lz, both valleys), the full-zone
+copies agree with each other to 1e-13 (E) / 1e-9 (Oz, Lz — limited by
+near-degenerate conditioning in the 1/D² Berry kernel), and `cell_area`
+is unchanged to 0.00e+00.
 
 For Chern numbers: only the total Chern of a set of bands between two
 well-defined energy gaps is quantized. Individual band Chern numbers are
@@ -656,12 +678,22 @@ and before the result is saved.  User-facing behaviour is in
 
 The Landau gauge requires a rectangular construction cell, which on a
 triangular moire lattice is the centered-rectangular two-lattice-point
-cell.  At flux `qq/pp = 2/(odd)` the magnetic translation group that
-survives is larger than the one the construction cell exposes: the true
-reciprocal lattice is `<2*G1, G2>` while the k-loop samples
-`<G1, G2>` with `G1 = b1/pp`, `G2 = qq*b2/pp`.  The computed BZ is
-therefore half the physical one along G1, and each physical band appears
-twice.
+cell.  When `qfac = gcd(2*pp, qq)` equals 2 with `pp` odd, the magnetic
+translation group that survives is larger than the one the construction
+cell exposes: the true reciprocal lattice is `<2*G1, G2>` while the
+k-loop samples `<G1, G2>` with `G1 = b1/pp`, `G2 = qfac*b2/pp`.  The
+computed BZ is therefore half the physical one along G1, and each
+physical band appears twice.
+
+The `qfac == 2` criterion covers the `qq/pp = 2/(odd)` cases the module
+was written for and also `(pp,qq) = (7,4)`, whose minimal zone has the
+same shape.  This is a description of when folding has been observed, not
+a test the code performs: `unfold.py` always detects pairs **from the
+data**, never from `qq/pp` or `qfac`.  Note that folding along G1 is
+distinct from the b2 redundancy removed by the minimal zone — at `(7,4)`
+both are present, and the redundancy must be gone before the degeneracy
+lines fit the `f1 - f2 = d_off` model (on the qq-extended grid the
+family-1 locus has slope 2 in `(f2, f1)` and `analyze_pair` fails).
 
 The two copies belong to different eigenvalues of the extra translation
 and **never hybridize**, so they cross rather than anticross.  `eigvalsh`
@@ -776,11 +808,12 @@ traceable.
 
 ### Pre-existing normalization caveat
 
-The sampled k-zone holds `pp²/qq` primitive cells, which is 12.5 for
+The sampled k-zone holds `pp²/qfac` primitive cells, which is 12.5 for
 `(pp,qq) = (5,2)` — not an integer.  Unfolding halves it to 6.25, still
 not the 5 that flux 1/5 would require.  This is a property of the
 Hofstadter k-zone convention, not of unfolding, and it does not affect
-orbit areas because `cell_area` is unchanged.
+orbit areas because `cell_area` is unchanged.  The same caveat applies at
+`(7,4)`: `pp²/qfac = 24.5`, i.e. 3.5 flux quanta through `vol_M`.
 
 ## Known considerations
 

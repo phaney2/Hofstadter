@@ -116,10 +116,25 @@ than re-parsing the source.
   the off-diagonal blocks.  See Moon & Koshino, PRB 90, 155406 (2014),
   Eqs. 25 and B1.  This applies to `main_v3.py`, `zerofield.py`, and the
   semiclassical code (`bandstructure.py`, `hofstadter_system.py`).
-- **Magnetic BZ unfolding**: At flux `qq/pp = 2/(odd)` the Landau-gauge
-  construction cell makes the semiclassical magnetic BZ a factor of two
-  too small along G1, so every band appears as two non-mixing subbands
-  that swap hi/lo across degeneracy lines.  The optional bandstructure
+- **Minimal magnetic k-zone**: `main_v3.py` and the semiclassical
+  Hofstadter mode both sample `[b1/pp, qfac*b2/pp]` with
+  `qfac = gcd(2*pp, qq)` — the smallest zone on which all
+  gauge-invariant quantities are periodic.  `full_zone = 1` restores the
+  qq-extended zone (`qq/qfac` identical copies, same k-averages, that
+  many times the cost).  In the semiclassical code `vol_M` moves with
+  the zone (`pp**2 * uc_area / (2*qfac)`) so that
+  `cell_area = (2π)²/(vol_M·nk1·nk2)` — and hence every orbit area — is
+  invariant.  `qfac == qq` for all fluxes run before `(7,4)`; run
+  `python semiclassical/validate_zone.py` after touching the k-mesh or
+  `vol_M`.
+- **Magnetic BZ unfolding**: When `gcd(2*pp,qq) == 2` with `pp` odd
+  (flux `qq/pp = 2/(odd)`, and also e.g. `(pp,qq) = (7,4)`) the
+  Landau-gauge construction cell makes the semiclassical magnetic BZ a
+  factor of two too small along G1, so every band appears as two
+  non-mixing subbands that swap hi/lo across degeneracy lines.  This is
+  a separate effect from the b2 redundancy above, and the minimal zone
+  must be in place first — on the qq-extended grid the degeneracy lines
+  do not fit the model `analyze_pair` uses.  The optional bandstructure
   parameter `unfold = 1` (default 0, `semiclassical/unfold.py`) detects
   such pairs **from the data** — never from `qq/pp` — and recombines each
   into one smooth band on the doubled zone, doubling `nk1` and halving
@@ -184,6 +199,11 @@ bilayer, dim=98 for monolayer). The MATLAB benchmark `bands_BG.mat` uses
 MATLAB benchmarks are at `<OneDrive>/MATLAB/Duartes_code/Semiclassical_zero_Field/`.
 `benchmark_data_30.mat` (nk=30) and `benchmark_data_100.mat` (nk=100)
 contain E_K, Oz_K, Lz_K, area_K, LLK, etc.
+
+`semiclassical/validate_zone.py` (untracked) checks the minimal k-zone
+against `full_zone = 1` at `(pp,qq) = (7,4)`: bit-identical E/Oz/Lz at
+the shared k-points, exact `cell_area` invariance.  Run it after any
+change to the Hofstadter k-mesh or `vol_M`.
 
 Band structure quantities (E_K, Oz_K, Lz_K, kpoints, vol_M) match MATLAB
 to machine precision (~1e-14 relative). Orbit areas match to machine
