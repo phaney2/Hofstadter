@@ -14,7 +14,7 @@ os.environ['OPENBLAS_NUM_THREADS'] = '1'
 
 import sys
 import numpy as np
-from scipy import linalg
+from scipy import linalg, sparse, special
 from multiprocessing import Pool, cpu_count
 
 from constants import HBAR, Q_E, A_GRAPHENE, A_HBN
@@ -26,10 +26,6 @@ from hamiltonian import (get_interbilayerterms_K, get_interbilayerterms_Kp,
                          get_berry_connection_K, get_berry_connection_Kp)
 
 HBAR_EV = 6.582119569e-16  # eV*s
-
-# np.trapezoid is the numpy>=2 name for np.trapz (which numpy>=2 removed,
-# so the fallback must not be evaluated eagerly)
-_trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +105,79 @@ def _solve_kpoint(args):
 # Transport: per-k-point solver with in-worker Kubo summation
 # ---------------------------------------------------------------------------
 
+def _build_eps_quadrature(all_mu, kT, Gamma_list, scba_grid, scba_Gamma,
+                          eps_per_width, grid_floor):
+    """Energy grid and thermal quadrature weights for the Kubo integrals.
+
+    Both are k-independent, so they are built once and shipped to the
+    workers.  The per-mu integrals
+
+        sigma(mu) = int deps (-df/deps) Phi(eps)
+        L12(mu)   = int deps (-df/deps) (eps - mu) Phi(eps)
+
+    then reduce to the matrix-vector products W @ Phi and W2 @ Phi.  W
+    and W2 hold the trapezoid weights times the thermal factor; they are
+    sparse because -df/deps is nonzero only within a few kT of mu (the
+    cut at 40 kT is exact to 4e-18 relative).
+
+    The grid is uniform at d_eps = min(Gamma_min, kT) / eps_per_width,
+    where Gamma_min is the narrowest Lorentzian the grid has to resolve
+    anywhere in the window.  In SCBA mode Gamma(E) = pi*Gamma0^2*rho(E)
+    collapses to its floor wherever rho vanishes, which would drive d_eps
+    to scba_floor*Gamma0/eps_per_width across the whole window; since Phi
+    has no structure to resolve where the DOS is zero, Gamma is clamped
+    below at `grid_floor` before the minimum is taken.  That clamp is what
+    makes the SCBA grid affordable (56668 -> 11335 points on the 2/3 test
+    case).
+
+    Keep the grid *uniform*.  A grid graded by the local Gamma(eps) is the
+    obvious refinement and it does not work: composite trapezoid on
+    eps = g(u) with u uniform is the trapezoid rule in u, which converges
+    exponentially only while g is smooth, and g inherits a kink from every
+    crossing of the `grid_floor` clamp.  Grading buys ~14% fewer points
+    and costs a factor of 20 in accuracy (4.0e-3 vs 2.0e-4 on the same
+    case).
+
+    Returns (eps_grid, W, W2), all in eV.
+    """
+    margin = 10.0 * kT
+    lo = all_mu.min() - margin
+    hi = all_mu.max() + margin
+
+    if scba_Gamma is None:
+        G_min = np.min(Gamma_list)
+    else:
+        in_win = (scba_grid >= lo) & (scba_grid <= hi)
+        G_win = scba_Gamma[in_win] if in_win.any() else scba_Gamma
+        G_min = max(np.min(G_win), grid_floor)
+
+    d_eps = min(G_min, kT) / eps_per_width
+    n_eps = max(int(np.ceil((hi - lo) / d_eps)) + 1, 50)
+    eps_grid = np.linspace(lo, hi, n_eps)
+
+    dg = np.diff(eps_grid)
+    w = np.empty(n_eps)
+    w[0] = 0.5 * dg[0]
+    w[-1] = 0.5 * dg[-1]
+    w[1:-1] = 0.5 * (dg[:-1] + dg[1:])
+
+    n_mu = len(all_mu)
+    i0 = np.searchsorted(eps_grid, all_mu - 40.0 * kT, side='left')
+    i1 = np.searchsorted(eps_grid, all_mu + 40.0 * kT, side='right')
+    counts = i1 - i0
+    indptr = np.concatenate(([0], np.cumsum(counts)))
+    cols = np.concatenate([np.arange(a, b) for a, b in zip(i0, i1)])
+    rows = np.repeat(np.arange(n_mu), counts)
+
+    de = eps_grid[cols] - all_mu[rows]
+    f = 1.0 / (np.exp(de / kT) + 1.0)
+    dW = (1.0 / kT) * f * (1.0 - f) * w[cols]
+    W = sparse.csr_array((dW, cols, indptr), shape=(n_mu, n_eps))
+    W2 = sparse.csr_array((dW * de, cols, indptr), shape=(n_mu, n_eps))
+
+    return eps_grid, W, W2
+
+
 def _transport_kubo_single_k(E_meV, vx, vy, d):
     """Compute per-k-point contribution to transport sums.
 
@@ -119,6 +188,22 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     the Gamma(eps)^2 factor from the normalized spectral functions, so
     the caller's pf_xx must NOT contain G^2.  In constant mode, sxx is
     G^2-free as before.
+
+    Phi_xx is built on the narrower band set d['sigma_xx_sub'] (an index
+    array into the selected bands): its summand carries A_n(eps)A_m(eps),
+    which falls off as 1/D^4 away from the mu window.  The Berry
+    curvature kernel K_n keeps the full set, where the 1/D^2 tail of
+    remote bands is needed for Chern convergence.
+
+    The xy channels never touch the energy grid.  Phi_xy is piecewise
+    constant with jumps K_n at the eigenvalues, so at kT > 0 the thermal
+    integrals collapse to closed form,
+
+        sigma_xy = sum_n K_n f(E_n - mu)
+        L12_xy   = kT * sum_n K_n * h(x_n),  x_n = (E_n - mu)/kT
+
+    with h(x) = x*f(x) + ln(1 + e^-x), an even function evaluated at |x|
+    to avoid cancellation.  Only Phi_xx needs quadrature.
     """
     E = E_meV / 1000.0
     all_mu = d['all_mu_eV']
@@ -131,7 +216,9 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     use_scba = scba_Gamma is not None
     scba_xy_constant = d.get('scba_xy_constant', 0)
 
-    vx_sq = np.abs(vx) ** 2
+    sub = d['sigma_xx_sub']
+    E_xx = E[sub]
+    vx_sq = np.abs(vx[np.ix_(sub, sub)]) ** 2
     Omega = np.imag(vx * np.conj(vy))
     D2 = (E[:, None] - E[None, :]) ** 2
 
@@ -141,21 +228,20 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     l12xx = np.zeros((n_gamma, n_mu))
     l12xy = np.zeros((n_gamma, n_mu))
 
-    sort_idx = np.argsort(E)
-    E_sorted = E[sort_idx]
-
     if kT > 0:
-        margin = 10.0 * kT
-        eps_lo = all_mu.min() - margin
-        eps_hi = all_mu.max() + margin
+        eps_grid = d['eps_grid']
+        W, W2 = d['eps_W'], d['eps_W2']
+        dE2 = (eps_grid[:, None] - E_xx[None, :]) ** 2
         if use_scba:
-            G_for_grid = np.min(scba_Gamma)
-        else:
-            G_for_grid = np.min(Gamma_list)
-        d_eps = min(G_for_grid, kT) / 5.0
-        n_eps = max(int(np.ceil((eps_hi - eps_lo) / d_eps)) + 1, 50)
-        eps_grid = np.linspace(eps_lo, eps_hi, n_eps)
-        dE2 = (eps_grid[:, None] - E[None, :]) ** 2
+            G2_eps = np.interp(eps_grid, scba_grid, scba_Gamma) ** 2
+        x = (E[:, None] - all_mu[None, :]) / kT
+        f_occ = special.expit(-x)
+        ax = np.abs(x)
+        h_occ = kT * (ax * special.expit(-ax) + np.log1p(np.exp(-ax)))
+    else:
+        sort_idx = np.argsort(E)
+        E_sorted = E[sort_idx]
+        mu_bins = np.searchsorted(E_sorted, all_mu, side='left')
 
     for ig, G in enumerate(Gamma_list):
         G2 = G * G
@@ -171,43 +257,30 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
         np.fill_diagonal(K_xy, 0.0)
         K_n = np.sum(K_xy, axis=1)
 
-        K_cumsum = np.concatenate(([0.0], np.cumsum(K_n[sort_idx])))
-
         if kT > 0:
             if use_scba:
-                G_eps = np.interp(eps_grid, scba_grid, scba_Gamma)
-                G2_eps = G_eps ** 2
                 L_all = 1.0 / (dE2 + G2_eps[:, None])
                 Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1) * G2_eps
             else:
                 L_all = 1.0 / (dE2 + G2)
                 Phi_xx = np.sum((L_all @ vx_sq) * L_all, axis=1)
 
-            bins = np.searchsorted(E_sorted, eps_grid, side='right')
-            Phi_xy = K_cumsum[bins]
-
-        for i_mu, mu in enumerate(all_mu):
-            if kT > 0:
-                x_eps = (eps_grid - mu) / kT
-                x_eps_clip = np.clip(x_eps, -500, 500)
-                f_eps = 1.0 / (np.exp(x_eps_clip) + 1.0)
-                neg_dfde = (1.0 / kT) * f_eps * (1.0 - f_eps)
-                sxx[ig, i_mu] = _trapz(neg_dfde * Phi_xx, eps_grid)
-                sxy[ig, i_mu] = _trapz(neg_dfde * Phi_xy, eps_grid)
-                l12xx[ig, i_mu] = _trapz(
-                    (eps_grid - mu) * neg_dfde * Phi_xx, eps_grid)
-                l12xy[ig, i_mu] = _trapz(
-                    (eps_grid - mu) * neg_dfde * Phi_xy, eps_grid)
-            else:
+            sxx[ig, :] = W @ Phi_xx
+            l12xx[ig, :] = W2 @ Phi_xx
+            sxy[ig, :] = K_n @ f_occ
+            l12xy[ig, :] = K_n @ h_occ
+        else:
+            K_cumsum = np.concatenate(([0.0], np.cumsum(K_n[sort_idx])))
+            sxy[ig, :] = K_cumsum[mu_bins]
+            for i_mu, mu in enumerate(all_mu):
                 if use_scba:
                     G_mu = float(np.interp(mu, scba_grid, scba_Gamma))
                     G2_mu = G_mu * G_mu
-                    L = 1.0 / ((E - mu) ** 2 + G2_mu)
+                    L = 1.0 / ((E_xx - mu) ** 2 + G2_mu)
                     sxx[ig, i_mu] = G2_mu * (L @ vx_sq @ L)
                 else:
-                    L = 1.0 / ((E - mu) ** 2 + G2)
+                    L = 1.0 / ((E_xx - mu) ** 2 + G2)
                     sxx[ig, i_mu] = L @ vx_sq @ L
-                sxy[ig, i_mu] = np.sum(K_n[E < mu])
 
     return sxx, sxy, l12xx, l12xy
 
@@ -629,6 +702,9 @@ def do_calc(filepath):
         scba_floor = float(d.get('scba_floor', 0.01))
         scba_anderson = int(d.get('scba_anderson', 5))
         scba_xy_constant = int(d.get('scba_xy_constant', 0))
+        sigma_xx_buffer_meV = d.get('sigma_xx_buffer', None)
+        eps_per_width = float(d.get('eps_per_width', 5.0))
+        eps_grid_floor = float(d.get('eps_grid_floor', 0.05))
         use_scba = broadening_mode == 'scba'
 
         if use_scba and len(Gamma_list_meV) > 1:
@@ -696,6 +772,26 @@ def do_calc(filepath):
         nb_kubo = len(band_sel_kubo)
         nb_scba = len(band_sel_scba)
 
+        # Phi_xx sub-selection (indices into band_sel_kubo).  The summand
+        # |vx_nm|^2 A_n(eps) A_m(eps) decays as 1/D^4 with the distance D
+        # of a band from the probe energy, so it converges far sooner than
+        # the 1/D^2 Berry curvature kernel that sets transport_buffer.  The
+        # residual error is dominated by near-remote cross terms and falls
+        # off as (Gamma/D)^2.5; 250*Gamma puts it near 1e-4 (measured by
+        # validate_transport_kubo.py --scan band).
+        if sigma_xx_buffer_meV is not None:
+            sxx_buffer = float(sigma_xx_buffer_meV)
+        else:
+            sxx_buffer = max(250.0 * float(Gamma_list_meV.max()), 100.0)
+        sxx_buffer = min(sxx_buffer, kubo_buffer)
+        probe_kubo = probe_eigs[band_sel_kubo]
+        sxx_mask = ((probe_kubo >= mu_min - sxx_buffer) &
+                    (probe_kubo <= mu_max + sxx_buffer))
+        sigma_xx_sub = np.where(sxx_mask)[0]
+        if len(sigma_xx_sub) == 0:
+            sigma_xx_sub = np.arange(nb_kubo)
+        nb_sxx = len(sigma_xx_sub)
+
         if use_scba:
             bmode_str = f"SCBA (Gamma0={Gamma_list_meV[0]} meV)"
         elif n_gamma == 1:
@@ -705,6 +801,8 @@ def do_calc(filepath):
                          f"{Gamma_list_meV[-1]}] meV ({n_gamma} values)")
         print(f"  Transport: {bmode_str}, kT = {kT_meV} meV, {len(mulist_meV)} mu points")
         print(f"  Band selection (k=0 probe): Kubo={nb_kubo}/{dim_total} bands [{kubo_lo:.1f}, {kubo_hi:.1f}] meV")
+        print(f"                               sigma_xx={nb_sxx}/{nb_kubo} bands "
+              f"[{mu_min - sxx_buffer:.1f}, {mu_max + sxx_buffer:.1f}] meV")
         if use_scba:
             print(f"                               SCBA={nb_scba}/{dim_total} bands [{scba_lo:.1f}, {scba_hi:.1f}] meV")
 
@@ -812,6 +910,17 @@ def do_calc(filepath):
                 maxiter=scba_maxiter, floor_ratio=scba_floor,
                 anderson_depth=scba_anderson)
 
+        # --- Kubo energy grid and thermal quadrature weights ---
+        # k-independent, so built once here rather than per k-point.
+        eps_grid = eps_W = eps_W2 = None
+        if kT_eV > 0:
+            grid_floor_eV = eps_grid_floor * Gamma_eV if use_scba else 0.0
+            eps_grid, eps_W, eps_W2 = _build_eps_quadrature(
+                all_mu, kT_eV, Gamma_list_eV, scba_E_grid, scba_Gamma_E,
+                eps_per_width, grid_floor_eV)
+            print(f"  Kubo eps grid: {len(eps_grid)} points on "
+                  f"[{eps_grid[0]*1000:.1f}, {eps_grid[-1]*1000:.1f}] meV")
+
         # --- Pack shared data (meV Hamiltonian, Ang/s velocity, Kubo params) ---
         shared = {
             'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
@@ -820,9 +929,13 @@ def do_calc(filepath):
             'valley': valley, 'M_mag': M_mag,
             'v0_eye': v0_eye_scaled,
             'transport_band_sel': band_sel_kubo,
+            'sigma_xx_sub': sigma_xx_sub,
             'all_mu_eV': all_mu,
             'Gamma_list_eV': Gamma_list_eV,
             'kT_eV': kT_eV,
+            'eps_grid': eps_grid,
+            'eps_W': eps_W,
+            'eps_W2': eps_W2,
             'scba_E_grid': scba_E_grid,
             'scba_Gamma_E': scba_Gamma_E,
             'scba_xy_constant': scba_xy_constant,

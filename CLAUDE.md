@@ -40,6 +40,7 @@ on hBN.  Four calculation modes:
 | `zerofield.py` | Zero-field engine: moire geometry, plane-wave Hamiltonian, k-path solver |
 | `validate.py` | Hofstadter benchmark against MATLAB `.mat` data (uses legacy conventions) |
 | `validate_transport_norm.py` | main_v3 normalization + minimal-zone validation (zone equivalence, same-B invariance, state counting) |
+| `validate_transport_kubo.py` | (untracked) Kubo evaluation-knob convergence (`sigma_xx_buffer`, `eps_per_width`, `eps_grid_floor`): reruns a case tightened and reports the difference |
 | `validate_zerofield.py` | Zero-field benchmark comparison against `bands_BG.mat` |
 | `plot_zerofield.m` | MATLAB plotting script for zero-field band structure |
 | `input_test.txt` | Default Hofstadter input (pp=1, qq=1) |
@@ -332,6 +333,16 @@ floor ensures enough remote bands are included for the Chern number sum
 to converge (tested to ~10⁻⁶ accuracy for BLG LLs).  The user can
 override via the `transport_buffer` input parameter, but setting it
 below ~500 meV will degrade σ_xy quantization.
+
+σ_xx uses a **separate, narrower window** (`sigma_xx_buffer`, default
+`max(250Γ, 100)` meV): its summand carries `A_n A_m` and decays as 1/D⁴,
+so it converges long before the Berry-curvature tail does.  Two more
+knobs size the σ_xx energy grid, `eps_per_width` and `eps_grid_floor`.
+σ_xy and L12_xy are evaluated in **closed form** (Φ_xy is a step
+function, so the thermal integrals collapse to
+`Σ_n K_n f(E_n−μ)`) and are independent of all three.  Run
+`python validate_transport_kubo.py` after touching any of them — it
+reruns a case with all three tightened and reports the difference.
 
 ## What not to do
 

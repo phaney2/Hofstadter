@@ -568,7 +568,18 @@ Kubo energy window (mulist range ± `transport_buffer`, default =
 max(mulist width, 500 meV)).  The buffer must be large enough to include
 remote bands whose Berry curvature contributions (decaying as 1/D²) are
 non-negligible; 500 meV is sufficient for typical BLG parameters.  For SCBA, a tighter window (mulist ± 5×Γ₀) selects the
-eigenvalue-collection bands.  The eigenvalues are histogrammed into a
+eigenvalue-collection bands.
+
+Within that set, a **narrower sub-window** is used for Phi_xx only
+(`sigma_xx_sub`, an index array into the selected bands): mulist range ±
+`sigma_xx_buffer`, default `max(250×Γ_max, 100 meV)` and never wider than
+`transport_buffer`.  The Phi_xx summand carries `A_n(eps) A_m(eps)` and
+so decays as 1/D⁴ with a band's distance D from the mu window, converging
+far sooner than the 1/D² Berry-curvature tail that sets
+`transport_buffer`.  The residual falls off roughly as (Γ/D)^2.5; at
+250×Γ it is ~2e-4.  K_n always keeps the full set.
+
+The eigenvalues are histogrammed into a
 crude DOS (`dos_K`, `dos_Kp`) on the mulist energy grid (same binning as
 `calctype = 'dos'`) at no extra cost, since the diagonalization is
 already required for the transport calculation.
@@ -623,11 +634,62 @@ Gamma → 0 limit the broadened Berry curvature per band is
 `Omega_n = -2*hbar^2 * sum_{m!=n} Im[vx_nm * conj(vy_nm)] / D_nm^2`,
 and the Chern number is `C_n = (1/2pi) * int Omega_n d^2k`.
 
-Both Phi are computed once per k-point on a fine energy grid spanning
-all mu values.  The per-mu integrals are cheap 1D quadratures (trapz).
+#### Evaluating the thermal integrals
+
+**The xy channels are closed-form — they never touch an energy grid.**
+Phi_xy is piecewise constant in eps with a jump K_n at each eigenvalue,
+so the convolutions collapse exactly:
+
+```
+sigma_xy = sum_n K_n * f(x_n)
+L12_xy   = kT * sum_n K_n * h(x_n),     x_n = (E_n - mu)/kT
+h(x)     = x*f(x) + ln(1 + e^-x)
+```
+
+`h` is even (`h(x) - h(-x) = x + ln[(1+e^-x)/(1+e^x)] = x - x = 0`), so
+it is evaluated at `|x|` to avoid catastrophic cancellation.  Both reduce
+to a matrix product over the (n, mu) table.
+
+This matters for accuracy, not just speed: trapezoid quadrature of a step
+function converges only as O(h), and on the previous default grid the
+error in sigma_xy reached **14%** in constant-Gamma mode (see the
+regression note at the end of this section).
+
+**Only Phi_xx needs quadrature.**  It is evaluated once per k-point on a
+uniform energy grid spanning `[min(mu) - 10kT, max(mu) + 10kT]`, and the
+per-mu integrals are the sparse matrix products `W @ Phi_xx` and
+`W2 @ Phi_xx`.  `W` and `W2` hold the trapezoid weights times the thermal
+factors `(-df/deps)` and `(-df/deps)(eps - mu)`; they are built once in
+`_build_eps_quadrature` (k-independent) and shipped to the workers.  They
+are sparse because `-df/deps` is negligible beyond ~40 kT from mu — the
+cut is exact to 4e-18 relative.
+
+Grid spacing is `d_eps = min(Gamma_min, kT) / eps_per_width`
+(`eps_per_width` default 5), where `Gamma_min` is the narrowest Lorentzian
+in the window.  In SCBA mode `Gamma(E) = pi*Gamma0^2*rho(E)` collapses to
+`scba_floor*Gamma0` wherever rho vanishes, which would size the entire
+grid off that floor; since Phi_xx has no structure to resolve where the
+DOS is zero, Gamma is clamped below at `eps_grid_floor * Gamma0`
+(default 0.05) before the minimum is taken.  On the 2/3 test case this is
+56668 → 11335 points, and it is the bulk of the SCBA speedup.
+
+The grid is deliberately **uniform**.  Grading it by the local Gamma(eps)
+is the obvious refinement and it makes things worse: composite trapezoid
+on `eps = g(u)` with u uniform is really the trapezoid rule in u, which
+converges exponentially only while the map g is smooth, and g picks up a
+kink at every crossing of the `eps_grid_floor` clamp.  Measured on the
+same case, grading buys 14% fewer points and costs a factor of 20 in
+accuracy (4.0e-3 vs 2.0e-4).
+
 At kT=0, `(-df/deps) = delta(eps-mu)`, so `sigma = Phi(mu)` and
 `L12 = 0`.  Fast paths are used in this limit: `L @ vx_sq @ L` for
-sigma_xx, `sum K_n[E_n < mu]` for sigma_xy.
+sigma_xx, and a cumulative sum of `K_n` indexed by `searchsorted` for
+sigma_xy.
+
+Convergence of the three knobs (`sigma_xx_buffer`, `eps_per_width`,
+`eps_grid_floor`) is checked by `validate_transport_kubo.py`, which reruns
+a case with all three tightened and reports the difference.  At the
+defaults the xy channels agree exactly and the xx channels to ~2e-4.
 
 ### Normalization (state counting)
 
@@ -793,6 +855,31 @@ self-consistent Gamma(E).
 
 **Output:** The self-consistent Gamma(E) is stored in the output file
 as `Gamma_E_grid` and `Gamma_E` (both in meV), along with `scba_niter`.
+
+### Fixed: sigma_xy quadrature error at kT > 0
+
+Before the closed-form xy evaluation described under "Kubo formulas",
+sigma_xy and L12_xy were obtained by trapezoid quadrature of the thermal
+integral over the eps grid.  Phi_xy is a **step function**, for which the
+trapezoid rule converges only as O(h), and the resulting per-eps error was
+amplified by cancellation in the k-sum.  On the constant-Gamma test case
+(flux 2/3, Gamma_0 = 1.5 meV, kT = 1 meV, 851 grid points) the error in
+sigma_xy reached **14%** — e.g. -2.42 against a correct -3.26 at
+mu = -99.3 meV, on a curve whose peak magnitude is 5.88.  Refining the
+grid converges to the closed-form value:
+
+| eps grid | max err in sigma_xy |
+|---|---|
+| 851 points (old default) | 1.4e-01 |
+| 20 000 points | 2.9e-03 |
+| closed form | 4.6e-05 |
+
+SCBA runs were affected less (~0.9%) only because their grid happened to
+be much finer.  kT = 0 was always exact and is unchanged.
+
+**Any sigma_xy or L12_xy computed at kT > 0 before this change carries a
+several-percent systematic error and should be regenerated.**  sigma_xx
+and L12_xx were not affected (Phi_xx is smooth).
 
 ---
 ---

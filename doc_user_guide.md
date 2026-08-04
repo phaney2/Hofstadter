@@ -106,6 +106,13 @@ variables (e.g., `elist` can use `nebin`).
 | `scba_floor` | float | `0.01` | Minimum Γ(E)/Γ₀ ratio; prevents Γ from vanishing in spectral gaps. |
 | `scba_anderson` | int | `5` | Anderson/Pulay mixing depth (number of prior iterations retained). Set to 0 for pure linear mixing. |
 | `scba_xy_constant` | int | `0` | If 1, use constant Γ₀ (instead of Γ(E_n)) in the σ_xy Berry curvature kernel. Default 0 = use SCBA broadening for σ_xy. |
+| `sigma_xx_buffer` | float (meV) | max(250·Γ_max, 100) | Energy buffer beyond mulist range for the σ_xx band window only (σ_xy always uses `transport_buffer`). The σ_xx summand decays as 1/D⁴ rather than 1/D², so it needs far fewer remote bands. Clamped to `transport_buffer`. Raising it costs time and changes σ_xx by ~2e-4 at the default. |
+| `eps_per_width` | float | `5.0` | Points per broadening width on the σ_xx energy grid. Grid spacing is `min(Γ_min, kT)/eps_per_width`. Raise for more accuracy at proportional cost. Has no effect on σ_xy/L12_xy, which are evaluated in closed form. |
+| `eps_grid_floor` | float | `0.05` | SCBA only: clamp on Γ(E)/Γ₀ when sizing the energy grid. Γ(E) collapses to `scba_floor`·Γ₀ wherever the DOS vanishes, and sizing the grid off that floor is wasted work because σ_xx has no structure there. Lower = finer grid, slower, marginally more accurate. Only the ratio `eps_grid_floor / eps_per_width` matters in the clamped regime. |
+
+Run `python validate_transport_kubo.py` after changing any of the last
+three defaults: it reruns a case with all of them tightened and reports
+the difference in each transport coefficient.
 
 ### Zero-field parameter reference
 
