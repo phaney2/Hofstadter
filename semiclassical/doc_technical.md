@@ -8,7 +8,7 @@ semiclassical.py          # stage-dispatch driver
   load_data                →  load .mat/.npz with MATLAB dimension handling
   _kmesh                   →  (nk1, nk2) from the stored data, falling back to the input file
   run_bandstructure        →  calls do_calc, applies unfolding when unfold=1
-  _periodic                →  False for an extended-zone band structure, else True
+  _periodic                →  False for an extended-zone band structure, else True; raises on a stage mismatch
   run_isoenergy            →  calls get_energy_resolved_data for K/Kp
   run_onsager              →  calls onsager_fan for K/Kp, optionally loads chi
   __main__                 →  calctype dispatch (bandstructure/isoenergy/onsager/all)
@@ -19,7 +19,10 @@ branches, and `run_isoenergy` / `run_onsager_bfield` read the mesh
 through `_kmesh` rather than from the input file.  This is what lets an
 unfolded band structure carry its doubled `nk1` (and halved `vol_M`)
 downstream; files written before these keys existed fall back to the
-input file.  `_periodic` plays the same role for the *shape* of the
+input file.  That fallback is lazy — `bs_data[k] if k in bs_data else
+inp[k]`, not `bs_data.get(k, inp[k])`, which would evaluate `inp[k]`
+eagerly and `KeyError` on a staged input file that legitimately omits
+`nk1`.  `_periodic` plays the same role for the *shape* of the
 surface: the extended-zone band structure is a finite patch, not a
 torus, so `isoenergy.py` must not tile it.
 
@@ -355,9 +358,13 @@ than the computed region and is dropped rather than wrapped — raise
 `extended_ntile` to resolve it.
 
 `run_isoenergy` and `_onsager_bfield_worker` set the flag from
-`_periodic(bs_data)`, i.e. from the stored `extended_zone` key, so it
+`_periodic(inp, bs_data)`, i.e. from the stored `extended_zone` key, so it
 follows the data rather than the input file.  The default is `True` and
 every other code path is bit-identical to before the flag existed.
+`_periodic` also raises if the input asks for `extended_zone` at a
+downstream stage where the data was never unfolded — the flag acts at the
+bandstructure stage, and silently ignoring it there would hand back folded
+orbits that look plausible.
 
 **Both outputs are orientation-independent.**  `_shoelace_area` takes
 `np.abs` of the signed shoelace sum, and step 7 selects the polygon

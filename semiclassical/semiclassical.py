@@ -79,17 +79,26 @@ def _kmesh(inp, bs_data):
     its doubled nk1 downstream; older files without the keys fall back to the
     input file.
     """
-    return (int(bs_data.get('nk1', inp['nk1'])),
-            int(bs_data.get('nk2', inp['nk2'])))
+    return tuple(int(bs_data[k]) if k in bs_data else int(inp[k])
+                 for k in ('nk1', 'nk2'))
 
 
-def _periodic(bs_data):
+def _periodic(inp, bs_data):
     """Whether the stored band structure repeats under the mesh vectors.
 
     False only for an extended-zone band structure, which covers a finite
-    patch of the extended zone rather than one BZ.
+    patch of the extended zone rather than one BZ.  Read from the data, not
+    the input file: `extended_zone` acts at the bandstructure stage, so
+    asking for it here would otherwise be silently ignored.
     """
-    return not int(bs_data.get('extended_zone', 0))
+    stored = int(bs_data.get('extended_zone', 0))
+    if int(inp.get('extended_zone', 0)) and not stored:
+        raise ValueError(
+            "extended_zone = 1 in the input, but the band structure in "
+            f"{inp.get('inputdata', 'the input data')} was not unfolded.  "
+            "extended_zone acts at the bandstructure stage; set it there and "
+            "re-run that stage.")
+    return not stored
 
 
 def run_bandstructure(inp, fpath):
@@ -109,7 +118,7 @@ def run_isoenergy(inp, bs_data):
     from isoenergy import get_energy_resolved_data
 
     nk1, nk2 = _kmesh(inp, bs_data)
-    periodic = _periodic(bs_data)
+    periodic = _periodic(inp, bs_data)
     nbands = bs_data['E_K'].shape[0]
     kT = float(inp.get('kT', 3.0))
     nE = int(inp['nE'])
@@ -323,7 +332,7 @@ def run_onsager_bfield(inp, bs_data):
     term_factors = tuple(tf_raw[:2])
 
     nk1, nk2 = _kmesh(inp, bs_data)
-    periodic = _periodic(bs_data)
+    periodic = _periodic(inp, bs_data)
     vol_M = float(bs_data['vol_M'])
     nbands = bs_data['E_K'].shape[0]
     nB = len(Blist)

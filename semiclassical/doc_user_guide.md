@@ -69,7 +69,7 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `isparallel`    | 0       | 1 = use multiprocessing for k-loop |
 | `stacking_type` | 2       | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). See Moon & Koshino, PRB 90, 155406 (2014). Ignored for monolayer. |
 | `moire_psi`     | 0.29    | Moire coupling phase psi (rad). |
-| `extended_zone` | 0       | 1 = unfold the moire folding into the extended zone (zero-field only).  See below. |
+| `extended_zone` | 0       | 1 = unfold the moire folding into the extended zone (zero-field only).  **Bandstructure stage only** — later stages read it from the data.  See below. |
 | `extended_ntile`| 3       | Odd, `≤ NQ`.  Side of the extended zone in moire BZs. |
 | `extended_mode` | `centroid` | `centroid` (breakdown-limit dispersion) or `dominant` (largest-weight state). |
 | `kT`            | 3       | Thermal broadening for dL/dE (meV) |
@@ -598,11 +598,33 @@ one extended momentum are combined into one value per intrinsic branch.
 Exact at zero moire potential; controlled and measurable at weak potential.
 Full description in `doc_technical.md`.
 
+### Which stage to set it in
+
+`extended_zone` acts **at the bandstructure stage** — it changes what gets
+computed and saved.  Put it in the input file you run with
+`calctype = bandstructure` (or `all`).  The `isoenergy`, `onsager` and
+`onsager_bfield` stages then read it back out of the saved `.mat`, along
+with the grown `nk1`/`nk2` and shrunk `vol_M`, and switch the contour
+tracer to `periodic=False` on their own.  Nothing extra is needed in the
+downstream input files.
+
+Setting `extended_zone = 1` in a downstream input file whose band structure
+was *not* unfolded raises rather than being silently ignored:
+
+```
+ValueError: extended_zone = 1 in the input, but the band structure in
+zf.mat was not unfolded.  extended_zone acts at the bandstructure stage;
+set it there and re-run that stage.
+```
+
+A single input file reused across stages (only `calctype` changing) is
+fine — the flag and the data agree.
+
 ### Parameters
 
 | Parameter | Default | Description |
 |---|---|---|
-| `extended_zone`  | 0 | 1 = unfold |
+| `extended_zone`  | 0 | 1 = unfold.  Bandstructure stage only. |
 | `extended_ntile` | 3 | Odd, `≤ NQ`.  Extended zone is `ntile × ntile` moire BZs.  Raise it if your orbits run off the edge. |
 | `extended_mode`  | `centroid` | `centroid`: weight-weighted mean — the smooth magnetic-breakdown dispersion, and the mode that cancels the folding-induced Berry curvature.  `dominant`: largest-weight state — keeps the true eigenvalue and the O(V²) level repulsion, but jumps by the gap at each Bragg plane.  Diagnostic; the spread between the two bounds the unfolding error. |
 
