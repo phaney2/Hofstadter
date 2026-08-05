@@ -25,7 +25,7 @@ intrinsic branch (see `unfold_kpoint`).
 
 Branches are identified by the bare dispersion: the Q-diagonal block of H is
 the moire-free mono/bilayer Hamiltonian at k - Q_j (the only moire term that
-survives on the diagonal is the uniform V0), so its eigenvalues label the
+survives on the diagonal is the uniform V0), so its eigenvectors label the
 2*nlayers branches at that momentum with no extra physics input.
 
 Validity: the unfolded orbits are the semiclassical orbits in the magnetic
@@ -87,61 +87,52 @@ def extended_setup(Q, q1, q2, NG, nlayers, NQ, ntile):
 def unfold_kpoint(ek, Psi, Oz, Lz, H, setup, mode='centroid'):
     """Reduce one k-point's spectrum to one value per (branch, extended point).
 
-    Returns `(E, Oz, Lz, W)`, each `(nb, nkeep)`, with nb = 2*nlayers intrinsic
-    branches and nkeep = ntile^2 retained Q-vectors.  `W` is the spectral
-    weight each branch collected: exactly 1 at V = 0, and its departure from 1
-    measures how well defined the unfolding is at that point.
+    Returns `(E, Oz, Lz, wmax)`, each `(nb, nkeep)`, with nb = 2*nlayers
+    intrinsic branches and nkeep = ntile^2 retained Q-vectors.  `wmax` is the
+    weight of the largest single state feeding the branch: 1 where one
+    eigenstate carries the whole extended momentum, ~1/2 at a two-state Bragg
+    anticrossing.
+
+    The branches are the eigenvectors u_b of the Q-diagonal block, not just its
+    eigenvalues: state n contributes |u_b^dag Psi_n|^2 to branch b.  That
+    partition is exact -- completeness of Psi makes each branch collect total
+    weight 1 -- and continuous in k, which a nearest-energy assignment is not.
+    Under argmin, a low-weight state drifting across the midpoint between two
+    reference energies moves all of its weight from one branch to the other
+    and steps the result.
 
     `mode` selects how the states sharing one extended momentum are combined:
 
     `centroid` (default)
-        weight-weighted mean over the states assigned to the branch.  At a
-        Bragg plane the two split states carry half the weight each and the
-        mean returns the unperturbed energy -- the breakdown-limit dispersion,
-        continuous across the plane.  The same average applied to Oz cancels
-        the equal-and-opposite curvature of an anticrossing pair, which is
-        what removes the folding-induced Berry curvature.
+        weight-weighted mean.  Completeness collapses it to
+        u_b^dag H_jj u_b = E_ref,b exactly, so the energies *are* the
+        moire-free dispersion at k - Q_j: the magnetic breakdown limit,
+        smooth through every Bragg plane, no gap anywhere.  Oz and Lz are not
+        eigenvalues of H_jj and do keep the moire mixing; averaging them
+        cancels the equal-and-opposite curvature of an anticrossing pair,
+        which is what removes the folding-induced Berry curvature.
 
     `dominant`
-        energy of the single largest-weight state.  Keeps the true eigenvalue,
-        so the O(V^2) level repulsion away from the plane survives, at the
-        cost of a jump of order the gap across the plane itself.  Diagnostic:
-        the spread between the two modes bounds the error unfolding introduces.
+        the single largest-weight state.  Keeps the true eigenvalue, so the
+        moire gap survives, at the cost of a jump of order the gap across the
+        plane itself.  Diagnostic: the spread between the two modes bounds the
+        error unfolding introduces.
     """
-    rows, keep, nb = setup['rows'], setup['keep'], setup['nb']
-    nlayers = setup['nlayers']
-    nk, nw = len(keep), len(ek)
-
-    P = (np.abs(Psi)**2).reshape(nlayers, -1, 2, nw).sum(axis=(0, 2))[keep]
+    rows = setup['rows']
 
     # Q-diagonal block of H = bare Hamiltonian at k - Q_j (+ uniform V0)
-    Eref = np.linalg.eigvalsh(H[rows[:, :, None], rows[:, None, :]])
+    Eref, U = np.linalg.eigh(H[rows[:, :, None], rows[:, None, :]])
 
-    b = np.abs(ek[None, :, None] - Eref[:, None, :]).argmin(axis=2)
-    lin = (np.arange(nk)[:, None] * nb + b).ravel()
-    W = np.bincount(lin, P.ravel(), nk * nb).reshape(nk, nb)
+    P = np.abs(U.conj().transpose(0, 2, 1) @ Psi[rows])**2
+    W = P.sum(axis=2)
 
     if mode == 'dominant':
-        nstar = np.where(b[:, None, :] == np.arange(nb)[None, :, None],
-                         P[:, None, :], -1.0).argmax(axis=2)
-        E, O, L = ek[nstar].copy(), Oz[nstar].copy(), Lz[nstar].copy()
+        nstar = P.argmax(axis=2)
+        E, O, L = ek[nstar], Oz[nstar], Lz[nstar]
     else:
-        def acc(x):
-            return np.bincount(lin, (P * x[None, :]).ravel(),
-                               nk * nb).reshape(nk, nb)
-        with np.errstate(invalid='ignore', divide='ignore'):
-            E, O, L = acc(ek) / W, acc(Oz) / W, acc(Lz) / W
+        E, O, L = P @ ek / W, P @ Oz / W, P @ Lz / W
 
-    # A branch can collect no weight where two bare branches are degenerate and
-    # the nearest-reference assignment sends both states to the same one.  The
-    # branches coincide there, so the reference energy is the right fallback.
-    dead = W < 1e-8
-    if dead.any():
-        E[dead] = Eref[dead]
-        O[dead] = 0.0
-        L[dead] = 0.0
-
-    return E.T, O.T, L.T, W.T
+    return E.T, O.T, L.T, P.max(axis=2).T
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +205,7 @@ def assemble_extended(result, unf, setup, nk1, nk2, vb, vol_M, mode):
         new[f'Oz_{v}'] = scatter_extended(unf[v]['Oz'], setup, nk1, nk2) * 1e-20
         new[f'Lz_{v}'] = (scatter_extended(unf[v]['Lz'], setup, nk1, nk2)
                           * 1e-20 * 1e3)
-        new[f'wt_{v}'] = scatter_extended(unf[v]['W'], setup, nk1, nk2)
+        new[f'wt_{v}'] = scatter_extended(unf[v]['wmax'], setup, nk1, nk2)
 
     new['kpoints'] = extended_kmesh(setup, nk1, nk2, vb)
     new['nk1'] = ntile * nk1
@@ -225,15 +216,15 @@ def assemble_extended(result, unf, setup, nk1, nk2, vb, vol_M, mode):
     new['extended_ntile'] = ntile
     new['extended_mode'] = mode
 
-    wmin = min(new[f'wt_{v}'].min() for v in ('K', 'Kp'))
-    wmax = max(new[f'wt_{v}'].max() for v in ('K', 'Kp'))
+    wt = np.concatenate([new[f'wt_{v}'].ravel() for v in ('K', 'Kp')])
     print(f"  Extended zone: {setup['nb']} branches on a "
           f"{ntile*nk1} x {ntile*nk2} grid ({ntile}x{ntile} moire BZs), "
           f"mode={mode}")
-    print(f"  Extended zone: branch weight in [{wmin:.4f}, {wmax:.4f}] "
-          f"(1 = clean unfolding)")
-    if wmin < 0.5 or wmax > 1.5:
-        print("  Extended zone: WARNING - branch weights far from 1; the "
-              "moire potential is too strong for the unfolding to be "
-              "meaningful at some k-points.")
+    print(f"  Extended zone: dominant-state weight min {wt.min():.4f}, "
+          f"median {np.median(wt):.4f} (1 = one state per extended momentum; "
+          f"dips at the Bragg planes are the moire gaps)")
+    if np.median(wt) < 0.5:
+        print("  Extended zone: WARNING - branches are strongly mixed almost "
+              "everywhere, not just on the Bragg planes; the moire potential "
+              "is too strong for the unfolding to be meaningful.")
     return new

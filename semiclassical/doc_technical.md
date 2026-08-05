@@ -39,7 +39,7 @@ bandstructure.py          # moire Hamiltonian, Berry curvature, orbital moment
 extended_zone.py          # moire BZ unfolding (opt-in, zero-field only)
   qvector_indices           →  integer (m1, m2) of each Q on the (q1, q2) basis
   extended_setup            →  kept Q block, its H row indices, ntile bookkeeping
-  unfold_kpoint             →  per-k reduction to (nb, nkeep) E / Oz / Lz / W
+  unfold_kpoint             →  per-k reduction to (nb, nkeep) E / Oz / Lz / wmax
   extended_kmesh            →  k-points of the ntile*nk1 × ntile*nk2 grid
   scatter_extended          →  (Nk, nb, nkeep) → (nb, Nk_ext) via the (k, Q) map
   assemble_extended         →  replace E/Oz/Lz, grow the mesh, keep folded backup
@@ -887,28 +887,71 @@ of one extended momentum — that is what a gap at a moire Bragg plane *is*.
 
 Only `T0 = V0·I` survives on the Q-diagonal, so the `(nb × nb)` Q-diagonal
 sub-block of the assembled `H` **is** the bare mono/bilayer Hamiltonian at
-`k - Q_j` plus the uniform `V0`.  Its eigenvalues `E_ref,b` label the
+`k - Q_j` plus the uniform `V0`.  Its **eigenvectors** `u_b` label the
 `nb = 2·nlayers` intrinsic branches with no extra physics input and no
-duplicated Hamiltonian code; state `n` is assigned to
-`b = argmin_b |E_n - E_ref,b|`.
+duplicated Hamiltonian code: state `n` contributes `|u_b†Ψ_n|²` to branch
+`b`.  Completeness of `Ψ` then gives each branch total weight
+
+    sum_n |u_b†Ψ_n|² = 1
+
+**exactly**, at any potential strength — the partition is a resolution of
+the identity, not an approximation.
+
+This must be a projection and not a nearest-energy assignment.  Under
+`b = argmin_b |E_n - E_ref,b|` a state with small weight on the block moves
+*all* of its weight from one branch to the other as it drifts across the
+midpoint of two reference energies, stepping the result by
+(leaked weight) × (branch spacing).  At the weak potential below that was a
+0.8 meV discontinuity in an otherwise sub-meV-smooth surface, and it left a
+spurious 0.14 meV median offset from the bare dispersion that read like
+physical O(V²) content.  The projection has no such boundary to cross.
 
 ### Reduction modes (`extended_mode`)
 
-`centroid` (default) — weight-weighted mean over the states assigned to a
-branch.  At a Bragg plane the two split states carry half the weight each
-and the mean returns the unperturbed energy, so the surface is continuous
-across the plane.  This is the **magnetic breakdown limit** dispersion, and
-the identity `sum_n w_{n,j} E_n = Tr[H_jj]` makes that exact: summed over
-branches it reproduces the bare trace.  The same average applied to `Oz`
-cancels the equal-and-opposite curvature of an anticrossing pair, which is
-what removes the folding-induced Berry curvature — the enclosed flux then
-saturates at the physical `-2π` for gapped BLG instead of wandering.
+`centroid` (default) — weight-weighted mean.  Unit branch weight collapses
+it to
+
+    E_b = sum_n |u_b†Ψ_n|² E_n = u_b† (sum_n E_n Ψ_nΨ_n†)|_jj u_b
+        = u_b† H_jj u_b = E_ref,b
+
+so the centroid energies **are** the moire-free dispersion at `k - Q_j`,
+identically, for any `V`.  That is the **magnetic breakdown limit**: smooth
+through every Bragg plane, no gap anywhere, no kink.  The smoothness is a
+theorem, not a numerical observation — see "Where the moire potential went"
+below.
+
+`Oz` and `Lz` are *not* eigenvalues of `H_jj`, so they do keep the moire
+mixing: `Oz_b = u_b† Ô_jj u_b` with `Ô = sum_n Oz_n Ψ_nΨ_n†`, which depends
+on the full moire-mixed eigenvectors.  Averaging cancels the
+equal-and-opposite curvature of an anticrossing pair, which is what removes
+the folding-induced Berry curvature — the enclosed flux then saturates at
+the physical `-2π` for gapped BLG instead of wandering.
 
 `dominant` — energy of the single largest-weight state.  Keeps the true
-eigenvalue, so the O(V²) level repulsion away from the plane survives, at
-the cost of a jump of order the gap across the plane.  Diagnostic: the
-spread between the two modes bounds the error the unfolding introduces.  At
-the weak potential above the orbit areas differ by 0.1–4%.
+eigenvalue, so the moire gap survives, at the cost of a jump of order the
+gap across the plane.  Diagnostic: the spread between the two modes bounds
+the error the unfolding introduces.  At the weak potential above the orbit
+areas differ by 0.1–4%, and `dominant` departs from the bare dispersion by
+up to 10.4 meV.
+
+### Where the moire potential went
+
+In `centroid` mode the potential contributes **nothing** to the unfolded
+energies beyond the uniform `V0` shift that sits on the Q-diagonal.  That is
+the correct breakdown-limit answer — a carrier that tunnels straight through
+every Bragg plane never sees the gap, so it follows the unperturbed
+dispersion — but it means the energies could equivalently be got by
+diagonalizing the `nb × nb` blocks on the extended mesh directly.  The
+machinery earns its keep on `Oz` and `Lz`, which have no such shortcut.
+
+Two consequences worth keeping straight:
+
+- **Smooth extended bands are expected, not evidence the code works.**  A
+  kink at a Bragg plane would be a bug in `centroid` mode.  To *see* the
+  moire gaps, run `extended_mode = dominant`.
+- Setting `extended_mode = centroid` and then reading off gap-related
+  physics from `E` is a category error; only `Oz`, `Lz` and the orbit areas
+  carry `V` in that mode.
 
 ### Validity
 
@@ -920,11 +963,16 @@ Falicov–Stachowiak coupled-orbit network, which is not implemented.  For
 the small moire potentials this code is run at, breakdown is the relevant
 limit, but it is a physical assumption and not a bookkeeping fix.
 
-`wt_K` / `wt_Kp` are saved so the assumption can be checked: the weight a
-branch collected is 1 where the unfolding is clean, and its departure from
-1 measures how badly the branches mix.  `assemble_extended` prints the
-range and warns outside `[0.5, 1.5]`.  At the weak potential above the
-range is `[0.993, 1.007]`.
+`wt_K` / `wt_Kp` are saved so the assumption can be checked.  Since every
+branch collects total weight 1 by construction, the useful diagnostic is
+the **largest single-state weight** feeding the branch: 1 where one
+eigenstate carries the whole extended momentum, ~1/2 at a two-state Bragg
+anticrossing, `1/N` at an `N`-fold symmetry point.  Dips are therefore
+where the moire gaps are, and are expected.  `assemble_extended` prints the
+minimum and median and warns only if the **median** falls below 0.5 — that
+would mean the branches mix everywhere, not just on the planes, and the
+unfolding is meaningless.  At the weak potential above the median is 0.958
+with a minimum of 0.169.
 
 ### Mesh bookkeeping
 
@@ -951,14 +999,32 @@ Checked by `validate_extended_zone.py`:
 
 | Check | Result |
 |---|---|
-| `V = 0`: unit branch weight | max \|w−1\| = 1.3e-13 |
+| `V = 0`: one state per extended momentum | 92.6% of points at `w = 1` |
 | `V = 0`: `E_unfolded = E_bare` | max \|dE\| = 5.2e-12 meV |
-| `sum_b W_b = 2·nlayers` at every point | max residual 4.2e-13 |
-| `sum_{b,j} W·Oz = sum_n Oz` (all Q kept) | rel. 1.1e-16 |
-| `sum_{b,j} W·E = sum_n E` (all Q kept) | rel. 7.2e-17 |
+| weak `V`: `E_centroid = E_bare` | max \|dE\| = 7.2e-12 meV |
+| weak `V`: `dominant` differs from bare | max \|dE\| = 10.4 meV |
+| `sum_{b,j} Oz = sum_n Oz` (all Q kept) | rel. 3.6e-16 |
+| `sum_{b,j} E = sum_n E` (all Q kept) | rel. 5.3e-17 |
 | `(k, Q) → grid` bijection | each point written exactly once |
 | `k - Q` lands on its mesh point | max \|dk\| = 2.8e-17 Å⁻¹ |
 | valence area monotonic in E | 31/31 levels, no rise |
+
+Row 3 is the sharp test of the partition: the centroid must equal the bare
+dispersion at *finite* `V`, not just at `V = 0`.  The `argmin` assignment
+this replaced failed it by ~0.14 meV median / 0.68 meV max.  Row 4 keeps it
+from being vacuous — if `dominant` also matched, the two modes would be
+indistinguishable and row 3 would be testing nothing.
+
+Row 1 is a count, not an equality.  With `H` exactly block diagonal in `Q`,
+two states in *different* blocks that share an eigenvalue span a degenerate
+subspace of the full `H`, and `eigh` may return any basis of it, so `w` is
+basis-arbitrary at those points (a few percent of a symmetric mesh).  It
+cannot be perturbed away: `V` is precisely the operator coupling those
+states, so a tiny `V` mixes them maximally rather than localizing them (a
+six-fold point goes straight to `w = 1/6`), and no mesh shift removes an
+exact symmetry — an odd mesh only cuts the affected fraction from 7.4% to
+2.3%.  The energies are immune, since degenerate partners share the
+eigenvalue and every basis gives the same centroid.
 
 The last one is the artifact itself.  Over `E = -130 … -40` meV the folded
 area runs `0.002, 0.027, 0.088, 0.720, 0.564, 0.420, 0.286` (a 0.62 `A_BZ`

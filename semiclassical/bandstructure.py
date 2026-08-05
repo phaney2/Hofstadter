@@ -604,7 +604,7 @@ def do_calc(filepath):
     if ext is not None:
         nb, nkeep = ext[0]['nb'], len(ext[0]['keep'])
         unf = {v: {key: np.zeros((Nk_tot, nb, nkeep))
-                   for key in ('E', 'Oz', 'Lz', 'W')} for v in ('K', 'Kp')}
+                   for key in ('E', 'Oz', 'Lz', 'wmax')} for v in ('K', 'Kp')}
 
     for res in results:
         (kc, ek_K, ek_Kp, oz_K, oz_Kp, lz_K, lz_Kp, unf_k) = res
@@ -616,7 +616,7 @@ def do_calc(filepath):
         Lz_Kp[:, kc] = lz_Kp
         if unf is not None:
             for v, uv in zip(('K', 'Kp'), unf_k):
-                for key, arr in zip(('E', 'Oz', 'Lz', 'W'), uv):
+                for key, arr in zip(('E', 'Oz', 'Lz', 'wmax'), uv):
                     unf[v][key][kc] = arr
 
     # --- Band selection ---

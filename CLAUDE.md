@@ -156,8 +156,18 @@ than re-parsing the source.
   weight, reduces to `2*nlayers` intrinsic branches per extended point,
   and grows the mesh by `ntile` on each axis while shrinking `vol_M` by
   `ntile**2`, so `cell_area` and all absolute orbit areas are invariant.
-  Folded arrays kept under `*_folded`; `wt_K`/`wt_Kp` record the branch
-  weight (1 = clean).  The extended surface is **not periodic**, so
+  Branches are the **eigenvectors** of the Q-diagonal block, so each
+  collects total weight exactly 1 and the default `extended_mode =
+  centroid` returns `u_b^dag H_jj u_b` — the moire-free dispersion at
+  `k - Q_j`, identically.  The extended `E` are therefore smooth through
+  every Bragg plane **by construction**; a kink there is a bug, and the
+  moire potential survives only in `Oz`/`Lz` (and in `extended_mode =
+  dominant`).  Never use a nearest-energy `argmin` for the branch label:
+  it steps the surface when a low-weight state crosses a reference
+  midpoint.  Folded arrays kept under `*_folded`; `wt_K`/`wt_Kp` record
+  the largest single-state weight (1 = one state per extended momentum,
+  ~1/2 at a Bragg anticrossing — dips are the gaps and are expected).
+  The extended surface is **not periodic**, so
   `isoenergy_areas` must be called with `periodic=False` there — the
   driver does this from the stored `extended_zone` key via `_periodic`.
   Valid in the magnetic breakdown limit, which is the relevant one for
@@ -229,7 +239,9 @@ the shared k-points, exact `cell_area` invariance.  Run it after any
 change to the Hofstadter k-mesh or `vol_M`.
 
 `semiclassical/validate_extended_zone.py` checks the zero-field moire
-unfolding: exactness at `V = 0`, the weight sum rule, Berry-curvature and
+unfolding: exactness at `V = 0`, the centroid identity `E = E_bare` at
+*finite* `V` (the sharp test of the branch partition — the `argmin`
+assignment this replaced missed it by 0.14 meV), Berry-curvature and
 energy conservation under the centroid reduction, the `(k, Q) → extended
 grid` bijection, and orbit-area monotonicity through the moire BZ
 boundary.  All checks must PASS.  Run it after any change to

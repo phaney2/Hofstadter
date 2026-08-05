@@ -626,14 +626,27 @@ fine — the flag and the data agree.
 |---|---|---|
 | `extended_zone`  | 0 | 1 = unfold.  Bandstructure stage only. |
 | `extended_ntile` | 3 | Odd, `≤ NQ`.  Extended zone is `ntile × ntile` moire BZs.  Raise it if your orbits run off the edge. |
-| `extended_mode`  | `centroid` | `centroid`: weight-weighted mean — the smooth magnetic-breakdown dispersion, and the mode that cancels the folding-induced Berry curvature.  `dominant`: largest-weight state — keeps the true eigenvalue and the O(V²) level repulsion, but jumps by the gap at each Bragg plane.  Diagnostic; the spread between the two bounds the unfolding error. |
+| `extended_mode`  | `centroid` | `centroid`: weight-weighted mean.  The energies come out **exactly** equal to the moire-free dispersion at `k − Q_j` (see below), which is the magnetic-breakdown limit; this is also the mode that cancels the folding-induced Berry curvature.  `dominant`: largest-weight state — keeps the true eigenvalue and the moire gap, but jumps by the gap at each Bragg plane.  Diagnostic; the spread between the two bounds the unfolding error. |
+
+**The extended bands are smooth in `centroid` mode by construction, not by
+luck.**  Each branch collects total spectral weight exactly 1, so the
+weighted mean collapses to `u_b† H_jj u_b` — the eigenvalue of the bare
+mono/bilayer block at that momentum.  The moire potential therefore drops
+out of `E` entirely, apart from the uniform `V0` shift, and there is no kink
+or gap at any Bragg plane.  A kink there would be a bug.
+
+The potential is still present in `Oz`, `Lz` and hence in the Berry phases
+and orbit areas, which have no such collapse.  If you want to *see* the
+moire gaps in the band energies, run `extended_mode = dominant` — at the
+weak potential in the example that departs from the bare dispersion by up to
+10.4 meV, with jumps of order the gap (~12–15 meV) across the planes.
 
 ### Effect on the output
 
 | Key | Change |
 |---|---|
 | `E_K`, `E_Kp`, `Oz_*`, `Lz_*` | shape `(2*Nlayers, ntile²*nk1*nk2)` — one row per **intrinsic branch**, ascending (bilayer: 0,1 = valence, 2,3 = conduction).  `bands` is ignored. |
-| `wt_K`, `wt_Kp` | new: spectral weight each branch collected.  1 = clean unfolding. |
+| `wt_K`, `wt_Kp` | new: largest single-state weight feeding the branch.  1 = one eigenstate carries that extended momentum; ~1/2 at a Bragg anticrossing, `1/N` at an `N`-fold symmetry point.  Dips mark the moire gaps and are expected. |
 | `kpoints` | `(ntile²*nk1*nk2, 2)`, covering the extended zone |
 | `nk1`, `nk2` | each × `ntile` |
 | `vol_M` | ÷ `ntile²` |
