@@ -8,6 +8,7 @@ semiclassical.py          # stage-dispatch driver
   load_data                →  load .mat/.npz with MATLAB dimension handling
   _kmesh                   →  (nk1, nk2) from the stored data, falling back to the input file
   run_bandstructure        →  calls do_calc, applies unfolding when unfold=1
+  _periodic                →  False for an extended-zone band structure, else True
   run_isoenergy            →  calls get_energy_resolved_data for K/Kp
   run_onsager              →  calls onsager_fan for K/Kp, optionally loads chi
   __main__                 →  calctype dispatch (bandstructure/isoenergy/onsager/all)
@@ -18,7 +19,9 @@ branches, and `run_isoenergy` / `run_onsager_bfield` read the mesh
 through `_kmesh` rather than from the input file.  This is what lets an
 unfolded band structure carry its doubled `nk1` (and halved `vol_M`)
 downstream; files written before these keys existed fall back to the
-input file.
+input file.  `_periodic` plays the same role for the *shape* of the
+surface: the extended-zone band structure is a finite patch, not a
+torus, so `isoenergy.py` must not tile it.
 
 ### Band structure engine (zero-field)
 ```
@@ -29,6 +32,14 @@ bandstructure.py          # moire Hamiltonian, Berry curvature, orbital moment
   assemble_H_V_K / _Kp     →  H, Vx, Vy  (numwann × numwann)
   _kpoint_worker            →  per-k eigensolve + Berry curvature + orbital moment
   do_calc                   →  orchestrates k-loop, collects results, unit converts
+
+extended_zone.py          # moire BZ unfolding (opt-in, zero-field only)
+  qvector_indices           →  integer (m1, m2) of each Q on the (q1, q2) basis
+  extended_setup            →  kept Q block, its H row indices, ntile bookkeeping
+  unfold_kpoint             →  per-k reduction to (nb, nkeep) E / Oz / Lz / W
+  extended_kmesh            →  k-points of the ntile*nk1 × ntile*nk2 grid
+  scatter_extended          →  (Nk, nb, nkeep) → (nb, Nk_ext) via the (k, Q) map
+  assemble_extended         →  replace E/Oz/Lz, grow the mesh, keep folded backup
 ```
 
 ### Hofstadter mode
@@ -64,6 +75,7 @@ isoenergy.py              # orbit detection (post-processing)
 onsager.py                # Onsager quantization
 validate.py               # zero-field benchmark comparison
 validate_hofstadter.py    # Hofstadter benchmark comparison
+validate_extended_zone.py # extended-zone unfolding validation
 ```
 
 ## Lattice vector conventions
@@ -330,6 +342,22 @@ E_2d = E_bands[n, :].reshape(nk2, nk1, order='F')
 
 This matches the physics of MATLAB's `contourc` + `polyarea` + `inpolygon`
 approach. Orbit areas agree with MATLAB benchmark to machine precision.
+
+### Non-periodic surfaces (`periodic=False`)
+
+`isoenergy_areas(..., periodic=False)` traces the surface as given.  Step 1
+is skipped, step 4 is replaced by rejecting any contour that reaches the
+grid border, and the modulo in step 8 becomes a no-op.  This is what the
+extended-zone surface needs: it covers `ntile × ntile` moire BZs and then
+stops, so tiling it would glue together patches that are not neighbours and
+manufacture orbits.  An orbit that runs off the edge is genuinely larger
+than the computed region and is dropped rather than wrapped — raise
+`extended_ntile` to resolve it.
+
+`run_isoenergy` and `_onsager_bfield_worker` set the flag from
+`_periodic(bs_data)`, i.e. from the stored `extended_zone` key, so it
+follows the data rather than the input file.  The default is `True` and
+every other code path is bit-identical to before the flag existed.
 
 **Both outputs are orientation-independent.**  `_shoelace_area` takes
 `np.abs` of the signed shoelace sum, and step 7 selects the polygon
@@ -814,6 +842,122 @@ not the 5 that flux 1/5 would require.  This is a property of the
 Hofstadter k-zone convention, not of unfolding, and it does not affect
 orbit areas because `cell_area` is unchanged.  The same caveat applies at
 `(7,4)`: `pp²/qfac = 24.5`, i.e. 3.5 flux quanta through `vol_M`.
+
+## Extended-zone unfolding (`extended_zone.py`)
+
+Enabled by `extended_zone = 1`; applied inside `do_calc` at the end of the
+**zero-field** k-loop.  It is rejected for `qq > 0` and is mutually
+exclusive with `unfold = 1`: that one unfolds the *magnetic* BZ of a
+Hofstadter run, this one unfolds the *moire* BZ of a zero-field run.
+
+### Why the orbits break
+
+The moire potential folds the graphene Dirac cone into the small moire BZ.
+Once a constant-energy contour grows past that BZ it merges with its own
+periodic images and the tracer — correctly, for the surface it is given —
+switches to the complementary corner pockets.  A hole orbit then appears to
+turn electron-like: at `theta = 0.965°`, `V0 = -6.5`, `V1 = 9.0` meV the
+primary valence orbit grows to `0.82 A_BZ` and then collapses to `0.10` as
+the energy drops another 5 meV.  At `V0 = V1 = 0` the same thing happens
+with no potential at all, which is the tell: it is a property of the zone,
+not of the band structure.
+
+### Spectral weight
+
+The plane-wave basis makes the unfolding direct.  Block `j` of `H` lives at
+momentum `k - Q_j`, so
+
+```
+w(n, j) = sum_{layer, sublattice} |Psi(layer, j, sublattice ; n)|²
+```
+
+is the weight of moire state `n` at extended momentum `k - Q_j` (Ku,
+Berlijn & Lee; Popescu & Zunger).  At `V0 = V1 = 0` the weights are 0 or 1
+and the unfolding is exact.  At finite `V` several states share the weight
+of one extended momentum — that is what a gap at a moire Bragg plane *is*.
+
+### Branch identification
+
+Only `T0 = V0·I` survives on the Q-diagonal, so the `(nb × nb)` Q-diagonal
+sub-block of the assembled `H` **is** the bare mono/bilayer Hamiltonian at
+`k - Q_j` plus the uniform `V0`.  Its eigenvalues `E_ref,b` label the
+`nb = 2·nlayers` intrinsic branches with no extra physics input and no
+duplicated Hamiltonian code; state `n` is assigned to
+`b = argmin_b |E_n - E_ref,b|`.
+
+### Reduction modes (`extended_mode`)
+
+`centroid` (default) — weight-weighted mean over the states assigned to a
+branch.  At a Bragg plane the two split states carry half the weight each
+and the mean returns the unperturbed energy, so the surface is continuous
+across the plane.  This is the **magnetic breakdown limit** dispersion, and
+the identity `sum_n w_{n,j} E_n = Tr[H_jj]` makes that exact: summed over
+branches it reproduces the bare trace.  The same average applied to `Oz`
+cancels the equal-and-opposite curvature of an anticrossing pair, which is
+what removes the folding-induced Berry curvature — the enclosed flux then
+saturates at the physical `-2π` for gapped BLG instead of wandering.
+
+`dominant` — energy of the single largest-weight state.  Keeps the true
+eigenvalue, so the O(V²) level repulsion away from the plane survives, at
+the cost of a jump of order the gap across the plane.  Diagnostic: the
+spread between the two modes bounds the error the unfolding introduces.  At
+the weak potential above the orbit areas differ by 0.1–4%.
+
+### Validity
+
+The unfolded orbits are the semiclassical orbits in the **magnetic
+breakdown** limit (Blount: `ħω_c ≳ E_g²/E_F`), where the carrier tunnels
+straight through the Bragg planes and never sees the moire gap.  The folded
+orbits are the opposite limit.  Neither is right in between; that needs a
+Falicov–Stachowiak coupled-orbit network, which is not implemented.  For
+the small moire potentials this code is run at, breakdown is the relevant
+limit, but it is a physical assumption and not a bookkeeping fix.
+
+`wt_K` / `wt_Kp` are saved so the assumption can be checked: the weight a
+branch collected is 1 where the unfolding is clean, and its departure from
+1 measures how badly the branches mix.  `assemble_extended` prints the
+range and warns outside `[0.5, 1.5]`.  At the weak potential above the
+range is `[0.993, 1.007]`.
+
+### Mesh bookkeeping
+
+`ntile = extended_ntile` (odd, `≤ NQ`).  The kept Q-vectors are the
+complete `ntile × ntile` central block of the moire reciprocal lattice,
+which is what makes the `(k, Q) → extended grid` map a bijection: for
+`m1 ∈ [-off, off]`, `N1 = n1 + (off - m1)·nk1` covers `[0, ntile·nk1)`
+exactly once.
+
+`nk1 -> ntile*nk1`, `nk2 -> ntile*nk2`, `vol_M -> vol_M/ntile²`, so
+`cell_area = (2π)²/(vol_M · nk1 · nk2)` — and therefore every absolute
+orbit area — is **invariant**, exactly as in `unfold.py`.  The folded
+arrays are kept under `E_*_folded`, `Oz_*_folded`, `Lz_*_folded`,
+`kpoints_folded`, `nk1_folded`, `nk2_folded`, `vol_M_folded`.
+
+The band axis changes meaning: the folded output has one row per entry of
+`bands`, the extended output has exactly `nb = 2·nlayers` rows — the
+intrinsic branches, ascending (for bilayer: 0,1 = valence, 2,3 =
+conduction).  `bands` is ignored on the extended path.
+
+### Identities the result satisfies
+
+Checked by `validate_extended_zone.py`:
+
+| Check | Result |
+|---|---|
+| `V = 0`: unit branch weight | max \|w−1\| = 1.3e-13 |
+| `V = 0`: `E_unfolded = E_bare` | max \|dE\| = 5.2e-12 meV |
+| `sum_b W_b = 2·nlayers` at every point | max residual 4.2e-13 |
+| `sum_{b,j} W·Oz = sum_n Oz` (all Q kept) | rel. 1.1e-16 |
+| `sum_{b,j} W·E = sum_n E` (all Q kept) | rel. 7.2e-17 |
+| `(k, Q) → grid` bijection | each point written exactly once |
+| `k - Q` lands on its mesh point | max \|dk\| = 2.8e-17 Å⁻¹ |
+| valence area monotonic in E | 31/31 levels, no rise |
+
+The last one is the artifact itself.  Over `E = -130 … -40` meV the folded
+area runs `0.002, 0.027, 0.088, 0.720, 0.564, 0.420, 0.286` (a 0.62 `A_BZ`
+jump where the tracer switches pockets) while the extended area runs
+`1.210, 1.032, 0.863, 0.704, 0.554, 0.412, 0.280` — monotonic straight
+through and past `A_BZ`.
 
 ## Known considerations
 

@@ -21,6 +21,7 @@ from parser import parse_input_file
 from hofstadter_system import (build_hofstadter_setup,
                                assemble_H_V_K as hof_assemble_K,
                                assemble_H_V_Kp as hof_assemble_Kp)
+from extended_zone import extended_setup, unfold_kpoint, assemble_extended
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +272,7 @@ def assemble_H_V_Kp(kpt, Q, NG, vF, gamma1, v3, Utp, Ubm, H_hopp, hbar, nlayers,
 def _kpoint_worker(args):
     (kc, kpt, Q, NG, vF, gamma1, v3, Utp, Ubm,
      H_hopp_K, H_hopp_Kp, hbar, nlayers,
-     target_idx, remote_ind, eta, stacking_type) = args
+     target_idx, remote_ind, eta, stacking_type, ext) = args
 
     # --- K valley ---
     HK, VKx, VKy = assemble_H_V_K(
@@ -307,8 +308,14 @@ def _kpoint_worker(args):
     Oz_Kp = -2 * hbar**2 * np.sum(prodKp / denomKp, axis=1)
     Lz_Kp = hbar**2 * np.sum(denKp * prodKp / denomKp, axis=1)
 
+    unf = None
+    if ext is not None:
+        setup, mode = ext
+        unf = (unfold_kpoint(ekK, PsiK, Oz_K, Lz_K, HK, setup, mode),
+               unfold_kpoint(ekKp, PsiKp, Oz_Kp, Lz_Kp, HKp, setup, mode))
+
     return (kc, ekK[target_idx], ekKp[target_idx],
-            Oz_K, Oz_Kp, Lz_K, Lz_Kp)
+            Oz_K, Oz_Kp, Lz_K, Lz_Kp, unf)
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +476,10 @@ def do_calc(filepath):
 
     qq = int(inp.get('qq', 0))
     if qq > 0:
+        if int(inp.get('extended_zone', 0)):
+            raise ValueError("extended_zone applies to the zero-field "
+                             "calculation only (qq = 0); for the magnetic BZ "
+                             "of a Hofstadter run use unfold = 1")
         return _do_calc_hofstadter(inp)
 
     theta    = np.radians(float(inp.get('theta', 0.0)))
@@ -499,6 +510,12 @@ def do_calc(filepath):
     U        = np.atleast_1d(inp.get('U', np.array([0, 0])))
     bands_sel = np.atleast_1d(inp['bands']).astype(int)
     stacking_type = int(inp.get('stacking_type', 2))
+    do_ext    = int(inp.get('extended_zone', 0))
+    ext_ntile = int(inp.get('extended_ntile', 3))
+    ext_mode  = str(inp.get('extended_mode', 'centroid')).lower()
+    if ext_mode not in ('centroid', 'dominant'):
+        raise ValueError(f"extended_mode must be 'centroid' or 'dominant', "
+                         f"got {ext_mode!r}")
 
     hbar = 6.582119569e-16       # eV * s
 
@@ -515,6 +532,10 @@ def do_calc(filepath):
     print(f"  nlayers = {nlayers}, NQ = {NQ}, NG = {NG}")
     print(f"  numwann = {numwann}")
     print(f"  nk1 = {nk1}, nk2 = {nk2}, Nk = {nk1*nk2}")
+
+    ext = None
+    if do_ext:
+        ext = (extended_setup(Q, q1, q2, NG, nlayers, NQ, ext_ntile), ext_mode)
 
     # --- Hopping matrices ---
     H_hopp_K, H_hopp_Kp = construct_hopping(
@@ -546,7 +567,7 @@ def do_calc(filepath):
     # --- Build worker args ---
     common = (Q, NG, vF, gamma1_ev, v3, Utp, Ubm,
               H_hopp_K, H_hopp_Kp, hbar, nlayers,
-              target_idx, remote_ind, eta, stacking_type)
+              target_idx, remote_ind, eta, stacking_type, ext)
     args_list = [(kc, kpoints[kc], *common) for kc in range(Nk_tot)]
 
     # --- Run k-loop ---
@@ -579,14 +600,24 @@ def do_calc(filepath):
     Lz_K  = np.zeros((num_bands, Nk_tot))
     Lz_Kp = np.zeros((num_bands, Nk_tot))
 
+    unf = None
+    if ext is not None:
+        nb, nkeep = ext[0]['nb'], len(ext[0]['keep'])
+        unf = {v: {key: np.zeros((Nk_tot, nb, nkeep))
+                   for key in ('E', 'Oz', 'Lz', 'W')} for v in ('K', 'Kp')}
+
     for res in results:
-        (kc, ek_K, ek_Kp, oz_K, oz_Kp, lz_K, lz_Kp) = res
+        (kc, ek_K, ek_Kp, oz_K, oz_Kp, lz_K, lz_Kp, unf_k) = res
         E_K[:, kc]  = ek_K
         E_Kp[:, kc] = ek_Kp
         Oz_K[:, kc]  = oz_K
         Oz_Kp[:, kc] = oz_Kp
         Lz_K[:, kc]  = lz_K
         Lz_Kp[:, kc] = lz_Kp
+        if unf is not None:
+            for v, uv in zip(('K', 'Kp'), unf_k):
+                for key, arr in zip(('E', 'Oz', 'Lz', 'W'), uv):
+                    unf[v][key][kc] = arr
 
     # --- Band selection ---
     dim = E_K.shape[0]
@@ -608,9 +639,7 @@ def do_calc(filepath):
     Lz_K  = Lz_K  * 1e3
     Lz_Kp = Lz_Kp * 1e3
 
-    print("  Done.")
-
-    return {
+    result = {
         'kpoints': kpoints,
         'E_K': E_K,
         'E_Kp': E_Kp,
@@ -622,3 +651,11 @@ def do_calc(filepath):
         'nk1': nk1,
         'nk2': nk2,
     }
+
+    if ext is not None:
+        result = assemble_extended(result, unf, ext[0], nk1, nk2, vb,
+                                   vol_M_m2, ext_mode)
+
+    print("  Done.")
+
+    return result

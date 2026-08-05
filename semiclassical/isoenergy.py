@@ -5,6 +5,11 @@ Traces closed orbits at each energy level using marching squares on a
 3x3 BZ-tiled energy surface.  Orbit area is computed via the shoelace
 formula; enclosed k-points are found by polygon containment.
 
+The extended-zone surface (`extended_zone = 1`, see `extended_zone.py`) is
+not periodic, so it is traced untiled with `periodic=False`: an orbit that
+reaches the grid border is larger than the computed region and is discarded
+rather than wrapped.
+
 All functions operate on a single band at a time.
 """
 
@@ -20,7 +25,7 @@ def _shoelace_area(verts):
     return 0.5 * np.abs(np.dot(x, yp) - np.dot(xp, y))
 
 
-def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2):
+def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic=True):
     """
     Compute k-space orbit areas and enclosed k-point indices for one band.
 
@@ -34,6 +39,11 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2):
         Real-space moire unit cell area.
     nk1, nk2 : int
         k-mesh dimensions (Nk_tot = nk1 * nk2).
+    periodic : bool
+        Whether the surface repeats under the mesh vectors.  True (default)
+        tiles it 3x3 so orbits straddling the zone boundary close up.  False
+        traces it as given and drops any orbit reaching the border; use it for
+        the extended-zone surface, which is a finite patch, not a torus.
 
     Returns
     -------
@@ -52,6 +62,9 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2):
 
     E_2d = E_band.reshape(nk2, nk1, order='F')
 
+    ntile = 3 if periodic else 1
+    E_tiled = np.tile(E_2d, (ntile, ntile)) if periodic else E_2d
+
     areas = [[] for _ in range(nE)]
     kindices = [[] for _ in range(nE)]
 
@@ -60,7 +73,6 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2):
         if lvl <= bmin or lvl >= bmax:
             continue
 
-        E_tiled = np.tile(E_2d, (3, 3))
         contours = find_contours(E_tiled, lvl)
 
         orbit_areas = []
@@ -74,8 +86,12 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2):
             if len(contour) < 4:
                 continue
 
-            cx, cy = contour[:-1].mean(axis=0)
-            if cx < nk2 or cx >= 2 * nk2 or cy < nk1 or cy >= 2 * nk1:
+            if periodic:
+                cx, cy = contour[:-1].mean(axis=0)
+                if cx < nk2 or cx >= 2 * nk2 or cy < nk1 or cy >= 2 * nk1:
+                    continue
+            elif (contour[:, 0].min() <= 0 or contour[:, 0].max() >= nk2 - 1
+                  or contour[:, 1].min() <= 0 or contour[:, 1].max() >= nk1 - 1):
                 continue
 
             area_k = _shoelace_area(contour) * cell_area
@@ -83,9 +99,9 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2):
                 continue
 
             r0 = max(int(np.floor(contour[:, 0].min())), 0)
-            r1 = min(int(np.ceil(contour[:, 0].max())), 3 * nk2 - 1)
+            r1 = min(int(np.ceil(contour[:, 0].max())), ntile * nk2 - 1)
             c0 = max(int(np.floor(contour[:, 1].min())), 0)
-            c1 = min(int(np.ceil(contour[:, 1].max())), 3 * nk1 - 1)
+            c1 = min(int(np.ceil(contour[:, 1].max())), ntile * nk1 - 1)
 
             rr, cc = np.meshgrid(
                 np.arange(r0, r1 + 1),
@@ -114,7 +130,7 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2):
 
 
 def get_energy_resolved_data(kT, E_band, Oz_band, Lz_band,
-                             E_levels, vol_M, nk1, nk2):
+                             E_levels, vol_M, nk1, nk2, periodic=True):
     """
     Compute orbit areas, enclosed Berry curvature, and dL/dE for one band.
 
@@ -134,6 +150,8 @@ def get_energy_resolved_data(kT, E_band, Oz_band, Lz_band,
         Moire cell area.
     nk1, nk2 : int
         k-mesh dimensions.
+    periodic : bool
+        Passed through to `isoenergy_areas`.
 
     Returns
     -------
@@ -141,7 +159,7 @@ def get_energy_resolved_data(kT, E_band, Oz_band, Lz_band,
     enclosedBC : (nE, max_pockets) array
     dL_dE : (nE,) array
     """
-    A, K = isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2)
+    A, K = isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic)
     nE = len(E_levels)
     Nk = nk1 * nk2
     kweight = (2 * np.pi)**2 / (Nk * vol_M)

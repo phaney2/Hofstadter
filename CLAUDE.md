@@ -63,10 +63,12 @@ on hBN.  Four calculation modes:
 | `bandstructure.py` | Band structure engine: moire Hamiltonian, Berry curvature, orbital moment |
 | `susceptibility.py` | Standalone Fukuyama susceptibility (dChi/dE) calculation |
 | `hofstadter_system.py` | Hofstadter H/V setup and per-k-point assembly |
-| `isoenergy.py` | Contour-based isoenergy orbit detection (marching squares + shoelace area) |
+| `isoenergy.py` | Contour-based isoenergy orbit detection (marching squares + shoelace area); `periodic=False` for the non-periodic extended zone |
 | `onsager.py` | Onsager quantization solver: S(E)/(2π)² + corrections = B(n+½)/φ₀ |
 | `recompute_onsager.py` | Re-solve the LL fan from a saved `*_detail.mat` with different correction prefactors (e.g. flipped BC sign) |
 | `unfold.py` | Magnetic BZ unfolding for folded Hofstadter bands (`unfold = 1`) |
+| `extended_zone.py` | Moire BZ unfolding for the zero-field bands (`extended_zone = 1`) |
+| `validate_extended_zone.py` | (untracked) Extended-zone unfolding validation (V=0 exactness, sum rules, bijection, orbit monotonicity) |
 | `input.txt` | Example input with Onsager parameters |
 | `doc_technical.md` | Technical reference for the semiclassical code |
 | `doc_user_guide.md` | Input/output reference for the semiclassical code |
@@ -142,6 +144,26 @@ than re-parsing the source.
   `vol_M`.  The folded arrays are always kept under `*_folded` keys.
   Downstream stages read the mesh from the data via `_kmesh`, so
   `isoenergy` and `onsager_bfield` inherit it automatically.
+- **Extended-zone (moire BZ) unfolding**: the *zero-field* counterpart,
+  and a completely separate mechanism — `extended_zone = 1` (default 0,
+  `semiclassical/extended_zone.py`) is rejected for `qq > 0` and is
+  mutually exclusive with `unfold = 1`.  Moire folding makes a
+  constant-energy contour merge with its periodic images once it outgrows
+  the moire BZ, so the tracer switches to the complementary pockets and a
+  hole orbit appears to turn electron-like.  This happens at **zero moire
+  potential too** — it is an artifact of the zone.  The unfolding maps
+  each state back to the momentum it carries via its plane-wave spectral
+  weight, reduces to `2*nlayers` intrinsic branches per extended point,
+  and grows the mesh by `ntile` on each axis while shrinking `vol_M` by
+  `ntile**2`, so `cell_area` and all absolute orbit areas are invariant.
+  Folded arrays kept under `*_folded`; `wt_K`/`wt_Kp` record the branch
+  weight (1 = clean).  The extended surface is **not periodic**, so
+  `isoenergy_areas` must be called with `periodic=False` there — the
+  driver does this from the stored `extended_zone` key via `_periodic`.
+  Valid in the magnetic breakdown limit, which is the relevant one for
+  weak moire potentials but is a physical assumption, not bookkeeping.
+  Run `python semiclassical/validate_extended_zone.py` after touching
+  `extended_zone.py`, `isoenergy.py`, or the zero-field k-mesh.
 - The basis label system (composite strings with `_` separators, searched
   via substring intersection) is load-bearing. Any change to label
   formatting will silently break `getindices` lookups.
@@ -205,6 +227,13 @@ contain E_K, Oz_K, Lz_K, area_K, LLK, etc.
 against `full_zone = 1` at `(pp,qq) = (7,4)`: bit-identical E/Oz/Lz at
 the shared k-points, exact `cell_area` invariance.  Run it after any
 change to the Hofstadter k-mesh or `vol_M`.
+
+`semiclassical/validate_extended_zone.py` checks the zero-field moire
+unfolding: exactness at `V = 0`, the weight sum rule, Berry-curvature and
+energy conservation under the centroid reduction, the `(k, Q) → extended
+grid` bijection, and orbit-area monotonicity through the moire BZ
+boundary.  All checks must PASS.  Run it after any change to
+`extended_zone.py`, `isoenergy.py`, or the zero-field k-mesh.
 
 Band structure quantities (E_K, Oz_K, Lz_K, kpoints, vol_M) match MATLAB
 to machine precision (~1e-14 relative). Orbit areas match to machine

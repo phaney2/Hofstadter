@@ -69,7 +69,11 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `isparallel`    | 0       | 1 = use multiprocessing for k-loop |
 | `stacking_type` | 2       | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). See Moon & Koshino, PRB 90, 155406 (2014). Ignored for monolayer. |
 | `moire_psi`     | 0.29    | Moire coupling phase psi (rad). |
+| `extended_zone` | 0       | 1 = unfold the moire folding into the extended zone (zero-field only).  See below. |
+| `extended_ntile`| 3       | Odd, `≤ NQ`.  Side of the extended zone in moire BZs. |
+| `extended_mode` | `centroid` | `centroid` (breakdown-limit dispersion) or `dominant` (largest-weight state). |
 | `kT`            | 3       | Thermal broadening for dL/dE (meV) |
+| `iso_Erange`    | —       | `[emin emax]` (meV): restrict the isoenergy / `onsager_bfield` energy grids to this window instead of each band's full range. |
 | `Blist`         | —       | Magnetic field values (T) for Onsager quantization, e.g. `linspace(0,12,100)` |
 | `nmax`          | 50      | Maximum Landau level index (used with `Blist`) |
 | `term_factors`  | [1 1 1] | Multiplicative factors for Onsager correction terms: `[BC_factor morb_factor chi_factor]` (see below) |
@@ -305,7 +309,10 @@ Where `nbands = len(bands)`, `Nk = nk1 * nk2`.
 Downstream stages read `nk1`, `nk2` and `vol_M` from the data rather than
 from the input file, so a band structure written with `unfold = 1`
 carries its doubled mesh through the pipeline automatically.  See
-[Magnetic BZ unfolding](#magnetic-bz-unfolding-unfold--1).
+[Magnetic BZ unfolding](#magnetic-bz-unfolding-unfold--1).  The same holds
+for `extended_zone = 1`, which additionally sets `nbands = 2*Nlayers` and
+adds `wt_K` / `wt_Kp`; see
+[Extended-zone unfolding](#extended-zone-unfolding-extended_zone--1).
 
 ### Isoenergy output (present when `nE` is in input, or `calctype = isoenergy`)
 
@@ -558,6 +565,97 @@ nmax = 30
 ```
 
 This adds a fourth cumulative level (`_SBMC`) to the output.
+
+## Extended-zone unfolding (`extended_zone = 1`)
+
+**Zero-field only.**  Rejected for `qq > 0`, and mutually exclusive with
+`unfold = 1` — that flag unfolds the *magnetic* BZ of a Hofstadter run,
+this one unfolds the *moire* BZ of a zero-field run.
+
+### The problem it solves
+
+The moire potential folds the graphene Dirac cone into the small moire BZ.
+Once a constant-energy contour outgrows that BZ it merges with its own
+periodic images, and the orbit tracer switches to the complementary corner
+pockets.  A hole orbit then looks electron-like: its area *shrinks* as the
+energy drops.  This happens at **zero moire potential too**, which is the
+proof that it is an artifact of the zone and not of the physics.
+
+At `theta = 0.965°`, `V0 = -6.5`, `V1 = 9.0` meV the primary valence orbit
+grows to `0.82 A_BZ` and then collapses to `0.10` over the next 5 meV.
+With `extended_zone = 1` the same orbit runs monotonically past `A_BZ`:
+
+| E (meV) | −130 | −115 | −100 | −85 | −70 | −55 | −40 |
+|---|---|---|---|---|---|---|---|
+| folded, `A/A_BZ`   | 0.002 | 0.027 | 0.088 | 0.720 | 0.564 | 0.420 | 0.286 |
+| extended, `A/A_BZ` | 1.210 | 1.032 | 0.863 | 0.704 | 0.554 | 0.412 | 0.280 |
+
+### What it does
+
+Each moire eigenstate is mapped back to the momentum it actually carries,
+using its spectral weight on each plane-wave block, and the states sharing
+one extended momentum are combined into one value per intrinsic branch.
+Exact at zero moire potential; controlled and measurable at weak potential.
+Full description in `doc_technical.md`.
+
+### Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `extended_zone`  | 0 | 1 = unfold |
+| `extended_ntile` | 3 | Odd, `≤ NQ`.  Extended zone is `ntile × ntile` moire BZs.  Raise it if your orbits run off the edge. |
+| `extended_mode`  | `centroid` | `centroid`: weight-weighted mean — the smooth magnetic-breakdown dispersion, and the mode that cancels the folding-induced Berry curvature.  `dominant`: largest-weight state — keeps the true eigenvalue and the O(V²) level repulsion, but jumps by the gap at each Bragg plane.  Diagnostic; the spread between the two bounds the unfolding error. |
+
+### Effect on the output
+
+| Key | Change |
+|---|---|
+| `E_K`, `E_Kp`, `Oz_*`, `Lz_*` | shape `(2*Nlayers, ntile²*nk1*nk2)` — one row per **intrinsic branch**, ascending (bilayer: 0,1 = valence, 2,3 = conduction).  `bands` is ignored. |
+| `wt_K`, `wt_Kp` | new: spectral weight each branch collected.  1 = clean unfolding. |
+| `kpoints` | `(ntile²*nk1*nk2, 2)`, covering the extended zone |
+| `nk1`, `nk2` | each × `ntile` |
+| `vol_M` | ÷ `ntile²` |
+
+`nk1 * nk2 * cell_area` is unchanged, so absolute orbit areas stay on the
+same scale.  The folded arrays are kept under `E_K_folded`, `Oz_Kp_folded`,
+`Lz_K_folded`, `kpoints_folded`, `nk1_folded`, `nk2_folded`,
+`vol_M_folded`.  Three bookkeeping keys are added: `extended_zone`,
+`extended_ntile`, `extended_mode`.  Downstream stages pick all of this up
+from the data automatically, including the fact that the extended surface
+must not be tiled when tracing contours.
+
+### Two things to check
+
+- **Weight.** `assemble_extended` prints the branch-weight range and warns
+  outside `[0.5, 1.5]`.  A clean unfolding sits at 1 (the weak-potential
+  case above gives `[0.993, 1.007]`).  Far from 1 means the moire potential
+  is too strong for the branches to be separable and the result is not
+  meaningful.
+- **Grid size.** A `ntile = 3` zone resolves orbits up to roughly
+  `9 A_BZ`; beyond that the contour reaches the border and is discarded
+  (silently — the level simply has no orbit).  If the largest orbits you
+  need are missing, raise `extended_ntile` (cost scales as `ntile²` in
+  memory, not in k-loop time).
+
+### Restricting the energy grid
+
+A branch on the extended zone can span 900 meV, and `linspace(Emin, Emax,
+nE)` then wastes most of the grid.  `iso_Erange = [emin emax]` (meV)
+clips the per-band grids for both `isoenergy` and `onsager_bfield`; bands
+falling entirely outside the window are skipped.
+
+### Validity
+
+The unfolded orbits are the semiclassical orbits in the **magnetic
+breakdown** limit, where the cyclotron energy exceeds the moire gaps and
+the carrier tunnels through the Bragg planes.  The folded orbits are the
+opposite limit.  Neither is right in between — that needs a coupled-orbit
+network, which is not implemented.  For weak moire potentials breakdown is
+the relevant limit, but this is a physical assumption, not a bookkeeping
+fix, and `wt_*` is what tells you whether it holds.
+
+Run `python semiclassical/validate_extended_zone.py` after any change to
+`extended_zone.py` or the zero-field k-mesh.
 
 ## Hofstadter mode
 

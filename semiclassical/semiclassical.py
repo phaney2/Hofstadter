@@ -83,7 +83,21 @@ def _kmesh(inp, bs_data):
             int(bs_data.get('nk2', inp['nk2'])))
 
 
+def _periodic(bs_data):
+    """Whether the stored band structure repeats under the mesh vectors.
+
+    False only for an extended-zone band structure, which covers a finite
+    patch of the extended zone rather than one BZ.
+    """
+    return not int(bs_data.get('extended_zone', 0))
+
+
 def run_bandstructure(inp, fpath):
+    if int(inp.get('unfold', 0)) and int(inp.get('extended_zone', 0)):
+        raise ValueError(
+            "unfold and extended_zone cannot both be set: the first unfolds "
+            "the magnetic BZ of a Hofstadter run, the second unfolds the "
+            "moire BZ of a zero-field run.")
     result = do_calc(fpath)
     if int(inp.get('unfold', 0)):
         from unfold import unfold_bandstructure
@@ -95,11 +109,21 @@ def run_isoenergy(inp, bs_data):
     from isoenergy import get_energy_resolved_data
 
     nk1, nk2 = _kmesh(inp, bs_data)
+    periodic = _periodic(bs_data)
     nbands = bs_data['E_K'].shape[0]
     kT = float(inp.get('kT', 3.0))
     nE = int(inp['nE'])
 
-    print(f"  Isoenergy: nE={nE} per band, {nbands} bands, kT={kT} meV")
+    # A band on the extended zone spans hundreds of meV, most of it far from
+    # any energy of interest; iso_Erange spends the nE levels where they matter.
+    Erange = inp.get('iso_Erange', None)
+    if Erange is not None:
+        Erange = np.atleast_1d(Erange).ravel().astype(float)
+
+    print(f"  Isoenergy: nE={nE} per band, {nbands} bands, kT={kT} meV"
+          + ("" if periodic else ", extended zone (untiled)")
+          + ("" if Erange is None
+             else f", E restricted to [{Erange[0]:g}, {Erange[1]:g}] meV"))
 
     result = {'nbands': nbands}
 
@@ -107,6 +131,11 @@ def run_isoenergy(inp, bs_data):
         for valley in ('K', 'Kp'):
             emin = bs_data[f'E_{valley}'][n].min()
             emax = bs_data[f'E_{valley}'][n].max()
+            if Erange is not None:
+                emin, emax = max(emin, Erange[0]), min(emax, Erange[1])
+                if emax <= emin:
+                    print(f"    band {n} {valley}: outside iso_Erange, skipped")
+                    continue
             E_levels_n = np.linspace(emin, emax, nE)
             result[f'E_levels_{valley}_band{n}'] = E_levels_n
 
@@ -117,7 +146,7 @@ def run_isoenergy(inp, bs_data):
                 bs_data[f'E_{valley}'][n],
                 bs_data[f'Oz_{valley}'][n],
                 bs_data[f'Lz_{valley}'][n],
-                E_levels_n, bs_data['vol_M'], nk1, nk2)
+                E_levels_n, bs_data['vol_M'], nk1, nk2, periodic)
 
             result[f'area_{valley}_band{n}'] = area
             result[f'enclosedBC_{valley}_band{n}'] = enclosedBC
@@ -206,7 +235,8 @@ def _onsager_bfield_worker(args):
     from isoenergy import isoenergy_areas
     from onsager import onsager_fan_band
 
-    B, nE, nmax, gfactor, term_factors, Bmultiplier, lifshitz_threshold = args
+    (B, nE, nmax, gfactor, term_factors, Bmultiplier, lifshitz_threshold,
+     Erange) = args
     shared = _onsager_bfield_shared
 
     E_bands = shared['E_bands']
@@ -215,6 +245,7 @@ def _onsager_bfield_worker(args):
     vol_M = shared['vol_M']
     nk1 = shared['nk1']
     nk2 = shared['nk2']
+    periodic = shared['periodic']
 
     nbands = E_bands.shape[0]
     Nk = nk1 * nk2
@@ -228,9 +259,17 @@ def _onsager_bfield_worker(args):
     band_results = {}
     for n in range(nbands):
         E_mod = E_bands[n] + gfactor * B * Lz_prefactor * Lz_bands[n]
-        E_levels = np.linspace(E_mod.min(), E_mod.max(), nE)
+        lo, hi = E_mod.min(), E_mod.max()
+        if Erange is not None:
+            lo, hi = max(lo, Erange[0]), min(hi, Erange[1])
+        if hi <= lo:
+            band_results[n] = {
+                'area': np.zeros((nE, 1)), 'enclosedBC': np.zeros((nE, 1)),
+                'E_levels': np.full(nE, np.nan), 'll_dict': None}
+            continue
+        E_levels = np.linspace(lo, hi, nE)
 
-        A, K = isoenergy_areas(E_mod, E_levels, vol_M, nk1, nk2)
+        A, K = isoenergy_areas(E_mod, E_levels, vol_M, nk1, nk2, periodic)
 
         max_pockets = max((len(a) for a in A if a), default=1)
         area = np.zeros((nE, max_pockets))
@@ -284,15 +323,23 @@ def run_onsager_bfield(inp, bs_data):
     term_factors = tuple(tf_raw[:2])
 
     nk1, nk2 = _kmesh(inp, bs_data)
+    periodic = _periodic(bs_data)
     vol_M = float(bs_data['vol_M'])
     nbands = bs_data['E_K'].shape[0]
     nB = len(Blist)
 
     lifshitz_threshold = float(inp.get('lifshitz_threshold', 50))
 
+    Erange = inp.get('iso_Erange', None)
+    if Erange is not None:
+        Erange = np.atleast_1d(Erange).ravel().astype(float)
+
     print(f"  onsager_bfield: {nB} B values, nmax={nmax}, nE={nE}, "
           f"gfactor={gfactor}, term_factors={term_factors}, "
-          f"Bmultiplier={Bmultiplier}")
+          f"Bmultiplier={Bmultiplier}"
+          + ("" if periodic else ", extended zone (untiled)")
+          + ("" if Erange is None
+             else f", E restricted to [{Erange[0]:g}, {Erange[1]:g}] meV"))
 
     result = {'Blist': Blist, 'nmax': nmax, 'nE': nE,
               'nbands': nbands, 'gfactor': gfactor,
@@ -303,11 +350,11 @@ def run_onsager_bfield(inp, bs_data):
             'E_bands': bs_data[f'E_{valley}'],
             'Lz_bands': bs_data[f'Lz_{valley}'],
             'Oz_bands': bs_data[f'Oz_{valley}'],
-            'vol_M': vol_M, 'nk1': nk1, 'nk2': nk2,
+            'vol_M': vol_M, 'nk1': nk1, 'nk2': nk2, 'periodic': periodic,
         }
 
         args_list = [(B, nE, nmax, gfactor, term_factors, Bmultiplier,
-                      lifshitz_threshold) for B in Blist]
+                      lifshitz_threshold, Erange) for B in Blist]
 
         if isparallel:
             import multiprocessing
