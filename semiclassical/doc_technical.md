@@ -9,6 +9,7 @@ semiclassical.py          # stage-dispatch driver
   _kmesh                   →  (nk1, nk2) from the stored data, falling back to the input file
   run_bandstructure        →  calls do_calc, applies unfolding when unfold=1
   _periodic                →  False for an extended-zone band structure, else True; raises on a stage mismatch
+  _breakdown_setup         →  (vb, ntile) when breakdown=1; raises without extended-zone data
   run_isoenergy            →  calls get_energy_resolved_data for K/Kp
   run_onsager              →  calls onsager_fan for K/Kp, optionally loads chi
   __main__                 →  calctype dispatch (bandstructure/isoenergy/onsager/all)
@@ -39,10 +40,19 @@ bandstructure.py          # moire Hamiltonian, Berry curvature, orbital moment
 extended_zone.py          # moire BZ unfolding (opt-in, zero-field only)
   qvector_indices           →  integer (m1, m2) of each Q on the (q1, q2) basis
   extended_setup            →  kept Q block, its H row indices, ntile bookkeeping
-  unfold_kpoint             →  per-k reduction to (nb, nkeep) E / Oz / Lz / wmax
+  unfold_kpoint             →  per-k reduction to (nb, nkeep) E / Oz / Lz / wmax / gap
   extended_kmesh            →  k-points of the ntile*nk1 × ntile*nk2 grid
   scatter_extended          →  (Nk, nb, nkeep) → (nb, Nk_ext) via the (k, Q) map
   assemble_extended         →  replace E/Oz/Lz, grow the mesh, keep folded backup
+
+breakdown.py              # Landau-Zener broadening of the extended-zone LLs (opt-in)
+  reciprocal_shells         →  moire G-vectors whose Bragg plane an orbit can reach
+  band_gradient             →  dE/dk on the extended grid, meV*Angstrom
+  orbit_breakdown_fields    →  B0 at every Bragg-plane crossing of one orbit
+  cyclotron_mass            →  m_c = (hbar^2/2pi)|dA/dE| from the orbit areas
+  breakdown_band            →  B0 (nE, ncmax) + m_c (nE,) for one band
+  level_widths              →  Gamma(E, B) in meV
+  widths_at                 →  interpolate Gamma onto the LL energies of a fan array
 ```
 
 ### Hofstadter mode
@@ -365,6 +375,15 @@ every other code path is bit-identical to before the flag existed.
 downstream stage where the data was never unfolded — the flag acts at the
 bandstructure stage, and silently ignoring it there would hand back folded
 orbits that look plausible.
+
+### Returning the contours (`return_contours=True`)
+
+`isoenergy_areas` and `get_energy_resolved_data` optionally append the traced
+polygons to their return tuple, in `(row, col) = (N2, N1)` grid coordinates
+(tiled coordinates when `periodic`), ordered to match `areas` — so
+`contours[i][0]` is the same largest pocket that `area[i, 0]` measures and
+that `onsager_fan_band` quantizes.  Only `breakdown.py` uses this; the
+default is `False` and every other caller sees the original 2- and 3-tuples.
 
 **Both outputs are orientation-independent.**  `_shoelace_area` takes
 `np.abs` of the signed shoelace sum, and step 7 selects the polygon
@@ -963,6 +982,10 @@ Falicov–Stachowiak coupled-orbit network, which is not implemented.  For
 the small moire potentials this code is run at, breakdown is the relevant
 limit, but it is a physical assumption and not a bookkeeping fix.
 
+`breakdown = 1` recovers the *leading* correction to that limit — the gaps
+as a level width rather than a level shift — without building the network.
+See "Magnetic breakdown broadening" below.
+
 `wt_K` / `wt_Kp` are saved so the assumption can be checked.  Since every
 branch collects total weight 1 by construction, the useful diagnostic is
 the **largest single-state weight** feeding the branch: 1 where one
@@ -1031,6 +1054,136 @@ area runs `0.002, 0.027, 0.088, 0.720, 0.564, 0.420, 0.286` (a 0.62 `A_BZ`
 jump where the tracer switches pockets) while the extended area runs
 `1.210, 1.032, 0.863, 0.704, 0.554, 0.412, 0.280` — monotonic straight
 through and past `A_BZ`.
+
+## Magnetic breakdown broadening (`breakdown.py`)
+
+Enabled by `breakdown = 1`, at the **isoenergy** stage (which computes the
+Landau–Zener fields) and consumed at the **onsager** stage (which turns them
+into level widths).  Requires an extended-zone band structure; without one
+`_breakdown_setup` raises, since on the folded bands there are no Bragg
+planes left to tunnel through.
+
+### What it is for
+
+`extended_mode = centroid` is the breakdown limit taken all the way: the
+energies are *identically* the moire-free dispersion, so an Onsager fan built
+on them reproduces a slightly perturbed bilayer and ignores the small gaps at
+the moire BZ edge entirely.  `extended_mode = dominant` does not fix this —
+it moves the level by of order the gap only on the plane itself, which shifts
+one or two energy samples and leaves the fan essentially unchanged.
+
+The gaps do not enter the fan as a shift.  They enter as a **width**: a
+partly-reflecting Bragg plane makes the round trip not quite close, and the
+level acquires a spread.  Measured against the exact spectrum that width is
+60–100% of the level spacing at 2–12 T — not a small correction, and the
+extra structure the exact spectrum shows near the BZ edge.
+
+### Landau–Zener field
+
+At a crossing the two branches separate at a rate set by the velocity
+component along `Ĝ`, while the state is carried through the crossing by the
+component *in* the plane, because `ħk̇ = -e v×B` runs `k` perpendicular to
+`v`:
+
+```
+d(delta)/dt = 2 hbar v_perp (eB/hbar) v_par
+P = exp(-B0/B),   B0 = pi Eg^2 / (4 hbar e v_perp v_par)
+```
+
+Getting the two velocities the right way round matters: swapping them is a
+factor of `(v_par/v_perp)²` in `B0`, which at a grazing crossing is orders of
+magnitude.
+
+### Locating the crossings
+
+Directly, by sign changes of `s(k) = 2 k·G - |G|²` over the moire
+reciprocal-lattice shells with `|G| ≤ 2 k_max` (`reciprocal_shells`).  A
+Wigner–Seitz partition of the extended zone was tried first and is wrong:
+once the orbit outgrows the first zone it reports transitions between *outer*
+cells, crossed at near-grazing incidence where `v_par → 0` and `B0` runs to
+`10¹²` T, and the crossing count then wanders with energy (6/9/12) instead of
+staying at the 12 the hexagonal geometry demands.  Two shells can name the
+same physical point, so crossings closer than `1e-4 Å⁻¹` are deduplicated.
+
+Geometric sanity check: crossings turn on when the orbit reaches the inradius
+of the hexagonal moire BZ, which for a circular orbit is `A/A_BZ = π/(2√3) =
+0.907`.  On the valence band at `nk = 120` the last crossing-free level is at
+`0.881` and the first with crossings at `0.887`, and the count is 12 at 114
+of the 120 levels (9 at the two just past turn-on, 0 at the four below).
+
+### Reading the gap
+
+`unfold_kpoint` computes `gap = 2|E_dominant - E_centroid|` in *both* modes
+and `assemble_extended` stores it as `gap_K` / `gap_Kp` (meV).  For two
+states split by `Eg` and detuned by `delta` the centroid sits on the bare
+level and the dominant one at `sqrt(delta²/4 + (Eg/2)²)` from it, so `gap` is
+a **ridge of height `Eg`** running along the plane and decaying as
+`Eg²/(2 delta)` away from it.  `orbit_breakdown_fields` therefore takes the
+local **maximum** over a window of contour points around the crossing — a
+first version took the minimum of the two bracketing samples and
+systematically underestimated the gap.
+
+### Width
+
+A crossing with `P < 1` reflects with amplitude `r = sqrt(1-P)`, perturbing
+the round-trip phase by of order `r`.  With `dphi/dE = 2π/(ħω_c)`:
+
+```
+Gamma(E, B) = (hbar omega_c / 2 pi) sum_i sqrt(1 - exp(-B0_i/B))
+omega_c = eB/m_c,   m_c = (hbar^2/2 pi)|dA/dE|
+```
+
+`m_c` comes from the orbit areas the same stage already computed, so there
+are **no free parameters**.  Note `ħω_c` here is the true cyclotron energy,
+which is the fan's level spacing only at `onsager_Bmultiplier = 1`; at the
+default 4 the fan spacing is 4×`ħω_c` while `Gamma` is not rescaled (see "The
+Bmultiplier factor").
+
+### Validation
+
+Against the exact `main_v3.py` spectrum at `qq = 1` — the one flux where a
+magnetic subband *is* a Landau level, since the LL degeneracy per moire cell
+is `qq/(2pp)` and a subband holds `1/(2pp)`, so a level holds `qq` subbands.
+`pp = 12 … 2`, `nk = 16`, window `[-170, -100]` meV, 105 levels over
+1.9–11.6 T, at the parameters of the `moire_0.5_Um20_Em0.5` butterfly:
+
+| statistic | `w_exact / Gamma` |
+|---|---|
+| median | 0.830 |
+| mean | 0.845 |
+| geometric mean | 0.741 |
+| spread | 0.23 – 1.90 |
+| `B < 4 T` | 0.764 |
+| `B > 4 T` | 0.953 |
+
+Independently, the semiclassical `ħω_c` from `m_c` reproduces the exact
+subband spacing (18.4 meV measured vs 18.7–21.0 predicted at 11.55 T; 3.4 vs
+3.1–3.7 at 1.93 T), and the fan's level *count* in the window matches the
+exact one (20/19, 16/16, 15/14, 13/13, 12/11, 9/9, 8/8, 7/7, 5/5, 3/3 at
+`Bmultiplier = 1`).
+
+Mesh convergence: `Gamma` moves by 0.6–10% (median 4%) between `nk = 60` and
+`nk = 120`, the residual being how well the discrete grid resolves the peak
+of the gap ridge.
+
+**`Gamma` is an envelope, not a per-level prediction.**  The exact widths
+oscillate by a factor of ~4 from one level to the next — the coherent
+interference of the twelve crossings — and the Spearman correlation between
+`w_exact` and `Gamma` within a field is weak: −0.16 to +0.35 below 5 T,
++0.30 to +0.50 above.  An incoherent sum of reflection amplitudes cannot
+carry that; the oscillation needs the full Falicov–Stachowiak determinant.
+
+### Outputs
+
+Isoenergy stage: `B0_{valley}_band{n}` `(nE, ncmax)` in T, NaN-padded to the
+largest crossing count on the band, and `mc_{valley}_band{n}` `(nE,)` in kg,
+NaN where the band has no orbit.  Onsager stage: `Gamma_{valley}_band{n}`
+`(nE, nB)` in meV, and `width_{valley}_band{n}_{suffix}` `(nB, nmax+1)` — the
+same shape and key structure as `LL_{valley}_band{n}_{suffix}`, so a level
+plots as `LL ± width/2`.  NaN wherever the corresponding `LL` is NaN.
+
+`onsager_bfield` does not support this; the widths are emitted by
+`run_onsager` only.
 
 ## Known considerations
 

@@ -114,6 +114,22 @@ def run_bandstructure(inp, fpath):
     return result
 
 
+def _breakdown_setup(inp, bs_data):
+    """Extended-zone geometry needed by `breakdown.py`, or None if disabled."""
+    if not int(inp.get('breakdown', 0)):
+        return None
+    missing = [k for k in ('gap_K', 'vb', 'extended_ntile') if k not in bs_data]
+    if missing:
+        raise ValueError(
+            "breakdown = 1 needs an extended-zone band structure "
+            f"(missing {', '.join(missing)}).  Magnetic breakdown is the "
+            "correction to the extended-zone (centroid) unfolding, which is "
+            "the limit of transparent moire Bragg planes; on the folded bands "
+            "there are no planes to tunnel through.  Set extended_zone = 1 at "
+            "the bandstructure stage and re-run it.")
+    return np.asarray(bs_data['vb']), int(bs_data['extended_ntile'])
+
+
 def run_isoenergy(inp, bs_data):
     from isoenergy import get_energy_resolved_data
 
@@ -122,6 +138,7 @@ def run_isoenergy(inp, bs_data):
     nbands = bs_data['E_K'].shape[0]
     kT = float(inp.get('kT', 3.0))
     nE = int(inp['nE'])
+    bd = _breakdown_setup(inp, bs_data)
 
     # A band on the extended zone spans hundreds of meV, most of it far from
     # any energy of interest; iso_Erange spends the nE levels where they matter.
@@ -131,6 +148,7 @@ def run_isoenergy(inp, bs_data):
 
     print(f"  Isoenergy: nE={nE} per band, {nbands} bands, kT={kT} meV"
           + ("" if periodic else ", extended zone (untiled)")
+          + ("" if bd is None else ", magnetic breakdown")
           + ("" if Erange is None
              else f", E restricted to [{Erange[0]:g}, {Erange[1]:g}] meV"))
 
@@ -150,16 +168,32 @@ def run_isoenergy(inp, bs_data):
 
             print(f"    band {n} {valley}: E = [{emin:.2f}, {emax:.2f}] meV")
 
-            area, enclosedBC, dL_dE = get_energy_resolved_data(
+            out = get_energy_resolved_data(
                 kT,
                 bs_data[f'E_{valley}'][n],
                 bs_data[f'Oz_{valley}'][n],
                 bs_data[f'Lz_{valley}'][n],
-                E_levels_n, bs_data['vol_M'], nk1, nk2, periodic)
+                E_levels_n, bs_data['vol_M'], nk1, nk2, periodic,
+                return_contours=bd is not None)
+            area, enclosedBC, dL_dE = out[:3]
 
             result[f'area_{valley}_band{n}'] = area
             result[f'enclosedBC_{valley}_band{n}'] = enclosedBC
             result[f'dL_dE_{valley}_band{n}'] = dL_dE
+
+            if bd is not None:
+                from breakdown import breakdown_band
+                vb, ntile = bd
+                B0, mc = breakdown_band(
+                    bs_data[f'E_{valley}'][n], bs_data[f'gap_{valley}'][n],
+                    E_levels_n, area, out[3], vb, nk1, nk2, ntile)
+                result[f'B0_{valley}_band{n}'] = B0
+                result[f'mc_{valley}_band{n}'] = mc
+                nc = np.isfinite(B0).sum(axis=1)
+                print(f"      breakdown: {int(np.median(nc))} Bragg crossings "
+                      + ("(median), B0 = "
+                         f"{np.nanmedian(B0):.2f} T (median)"
+                         if np.isfinite(B0).any() else "- no gaps on the orbits"))
 
     print("  Done.")
     return result
@@ -184,8 +218,16 @@ def run_onsager(inp, iso_data):
     lifshitz_threshold = float(inp.get('lifshitz_threshold', 50))
     Bmultiplier = float(inp.get('onsager_Bmultiplier', 4.0))
 
+    has_bd = any(k.startswith('B0_') for k in iso_data)
+    if int(inp.get('breakdown', 0)) and not has_bd:
+        raise ValueError(
+            "breakdown = 1 in the input, but the isoenergy data in "
+            f"{inp.get('inputdata', 'the input data')} has no B0 arrays.  "
+            "breakdown acts at the isoenergy stage; set it there and re-run.")
+
     print(f"  Onsager: {len(Blist)} B values, nmax={nmax}, "
-          f"term_factors={term_factors}, Bmultiplier={Bmultiplier}")
+          f"term_factors={term_factors}, Bmultiplier={Bmultiplier}"
+          + (", level widths from magnetic breakdown" if has_bd else ""))
 
     result = {'Blist': Blist, 'nmax': nmax,
               'onsager_Bmultiplier': Bmultiplier}
@@ -225,6 +267,19 @@ def run_onsager(inp, iso_data):
                 for suffix, LL in ll_dict.items():
                     result[f'LL_{valley}_band{n}_{suffix}'] = LL
                 n_with_orbits += 1
+
+                bd_key = f'B0_{valley}_band{n}'
+                if bd_key in iso_data:
+                    from breakdown import level_widths, widths_at
+                    B0 = np.asarray(iso_data[bd_key]).reshape(
+                        len(E_levels_n), -1)
+                    mc = np.atleast_1d(
+                        iso_data[f'mc_{valley}_band{n}']).ravel()
+                    G = level_widths(B0, mc, Blist)
+                    result[f'Gamma_{valley}_band{n}'] = G
+                    for suffix, LL in ll_dict.items():
+                        result[f'width_{valley}_band{n}_{suffix}'] = \
+                            widths_at(LL, E_levels_n, G)
 
         print(f"  {valley} valley: {n_with_orbits} bands with orbits")
 

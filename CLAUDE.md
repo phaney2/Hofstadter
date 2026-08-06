@@ -68,6 +68,7 @@ on hBN.  Four calculation modes:
 | `recompute_onsager.py` | Re-solve the LL fan from a saved `*_detail.mat` with different correction prefactors (e.g. flipped BC sign) |
 | `unfold.py` | Magnetic BZ unfolding for folded Hofstadter bands (`unfold = 1`) |
 | `extended_zone.py` | Moire BZ unfolding for the zero-field bands (`extended_zone = 1`) |
+| `breakdown.py` | Landau-Zener broadening of the extended-zone LLs (`breakdown = 1`) |
 | `validate_extended_zone.py` | (untracked) Extended-zone unfolding validation (V=0 exactness, sum rules, bijection, orbit monotonicity) |
 | `input.txt` | Example input with Onsager parameters |
 | `doc_technical.md` | Technical reference for the semiclassical code |
@@ -174,6 +175,25 @@ than re-parsing the source.
   weak moire potentials but is a physical assumption, not bookkeeping.
   Run `python semiclassical/validate_extended_zone.py` after touching
   `extended_zone.py`, `isoenergy.py`, or the zero-field k-mesh.
+- **Magnetic breakdown broadening**: `breakdown = 1` (default 0,
+  `semiclassical/breakdown.py`) puts the moire Bragg-plane gaps back into
+  the extended-zone Onsager fan.  They do **not** enter as a level shift —
+  `extended_mode = dominant` moves the level only on the plane itself and
+  leaves the fan essentially unchanged — but as a level *width*:
+  `Gamma = (hbar*omega_c/2pi) * sum_i sqrt(1 - exp(-B0_i/B))` over the
+  Landau-Zener crossings, with `B0 = pi*Eg^2/(4*hbar*e*v_perp*v_par)` and
+  `m_c = (hbar^2/2pi)|dA/dE|` from the orbit areas.  No free parameters;
+  validated against `main_v3.py` at `qq = 1` (the one flux where a magnetic
+  subband *is* a Landau level), median `w_exact/Gamma = 0.83` over 105
+  levels at 1.9–11.6 T.  The width is 60–100% of the level spacing at
+  2–12 T.  It is an **envelope**: the exact widths oscillate by ~4x
+  level-to-level (coherent interference of the twelve crossings) and an
+  incoherent sum of reflection amplitudes cannot reproduce that — that
+  needs a Falicov-Stachowiak network, which is not implemented.  `Gamma`
+  uses the true `hbar*omega_c`, which is the fan's level spacing only at
+  `onsager_Bmultiplier = 1`.  Set the flag at the `isoenergy` **and**
+  `onsager` stages; it needs an extended-zone band structure and raises
+  without one.  `onsager_bfield` does not support it.
 - The basis label system (composite strings with `_` separators, searched
   via substring intersection) is load-bearing. Any change to label
   formatting will silently break `getindices` lookups.

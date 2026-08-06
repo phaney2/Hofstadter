@@ -25,7 +25,8 @@ def _shoelace_area(verts):
     return 0.5 * np.abs(np.dot(x, yp) - np.dot(xp, y))
 
 
-def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic=True):
+def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic=True,
+                    return_contours=False):
     """
     Compute k-space orbit areas and enclosed k-point indices for one band.
 
@@ -44,6 +45,10 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic=True):
         tiles it 3x3 so orbits straddling the zone boundary close up.  False
         traces it as given and drops any orbit reaching the border; use it for
         the extended-zone surface, which is a finite patch, not a torus.
+    return_contours : bool
+        Also return the traced polygons, in (row, col) grid coordinates --
+        tiled coordinates when `periodic`.  `breakdown.py` needs them to
+        locate the Bragg-plane crossings.
 
     Returns
     -------
@@ -51,6 +56,8 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic=True):
         areas[i] = list of orbit areas at energy i, sorted descending.
     kindices : list of lists
         kindices[i] = list of 1-D index arrays for k-points inside each orbit.
+    contours : list of lists
+        Only when `return_contours`; same ordering as `areas`.
     """
     nE = len(E_levels)
     Nk = nk1 * nk2
@@ -67,6 +74,7 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic=True):
 
     areas = [[] for _ in range(nE)]
     kindices = [[] for _ in range(nE)]
+    conts = [[] for _ in range(nE)]
 
     for i in range(nE):
         lvl = E_levels[i]
@@ -77,6 +85,7 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic=True):
 
         orbit_areas = []
         orbit_kidx = []
+        orbit_conts = []
 
         for contour in contours:
             if np.linalg.norm(contour[0] - contour[-1]) > 1.0:
@@ -120,17 +129,20 @@ def isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic=True):
 
             orbit_areas.append(area_k)
             orbit_kidx.append(orig_lin)
+            orbit_conts.append(contour)
 
         if orbit_areas:
             order = np.argsort(orbit_areas)[::-1]
             areas[i] = [orbit_areas[j] for j in order]
             kindices[i] = [orbit_kidx[j] for j in order]
+            conts[i] = [orbit_conts[j] for j in order]
 
-    return areas, kindices
+    return (areas, kindices, conts) if return_contours else (areas, kindices)
 
 
 def get_energy_resolved_data(kT, E_band, Oz_band, Lz_band,
-                             E_levels, vol_M, nk1, nk2, periodic=True):
+                             E_levels, vol_M, nk1, nk2, periodic=True,
+                             return_contours=False):
     """
     Compute orbit areas, enclosed Berry curvature, and dL/dE for one band.
 
@@ -152,14 +164,21 @@ def get_energy_resolved_data(kT, E_band, Oz_band, Lz_band,
         k-mesh dimensions.
     periodic : bool
         Passed through to `isoenergy_areas`.
+    return_contours : bool
+        Passed through to `isoenergy_areas`; the polygons are appended to the
+        returned tuple.
 
     Returns
     -------
     area : (nE, max_pockets) array
     enclosedBC : (nE, max_pockets) array
     dL_dE : (nE,) array
+    contours : list of lists
+        Only when `return_contours`.
     """
-    A, K = isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic)
+    out = isoenergy_areas(E_band, E_levels, vol_M, nk1, nk2, periodic,
+                          return_contours)
+    A, K = out[0], out[1]
     nE = len(E_levels)
     Nk = nk1 * nk2
     kweight = (2 * np.pi)**2 / (Nk * vol_M)
@@ -181,4 +200,6 @@ def get_energy_resolved_data(kT, E_band, Oz_band, Lz_band,
     dfde = np.exp(-np.abs(x)) / (kT * (1 + np.exp(-np.abs(x)))**2)
     dL_dE = (dfde @ Lz_band) * kweight
 
+    if return_contours:
+        return area, enclosedBC, dL_dE, out[2]
     return area, enclosedBC, dL_dE

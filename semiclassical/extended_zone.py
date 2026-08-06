@@ -87,11 +87,18 @@ def extended_setup(Q, q1, q2, NG, nlayers, NQ, ntile):
 def unfold_kpoint(ek, Psi, Oz, Lz, H, setup, mode='centroid'):
     """Reduce one k-point's spectrum to one value per (branch, extended point).
 
-    Returns `(E, Oz, Lz, wmax)`, each `(nb, nkeep)`, with nb = 2*nlayers
+    Returns `(E, Oz, Lz, wmax, gap)`, each `(nb, nkeep)`, with nb = 2*nlayers
     intrinsic branches and nkeep = ntile^2 retained Q-vectors.  `wmax` is the
     weight of the largest single state feeding the branch: 1 where one
     eigenstate carries the whole extended momentum, ~1/2 at a two-state Bragg
     anticrossing.
+
+    `gap` is twice the distance from the centroid to the dominant state, which
+    is the local moire gap: for two states split by E_g and detuned by delta,
+    the centroid sits on the bare level and the dominant one at
+    sqrt(delta^2/4 + (E_g/2)^2) from it, a peak of height E_g/2 on the plane
+    decaying as E_g^2/(4*delta) away from it.  It is computed in both modes --
+    `breakdown.py` needs it to size the Landau-Zener tunnelling.
 
     The branches are the eigenvectors u_b of the Q-diagonal block, not just its
     eigenvalues: state n contributes |u_b^dag Psi_n|^2 to branch b.  That
@@ -126,13 +133,16 @@ def unfold_kpoint(ek, Psi, Oz, Lz, H, setup, mode='centroid'):
     P = np.abs(U.conj().transpose(0, 2, 1) @ Psi[rows])**2
     W = P.sum(axis=2)
 
+    nstar = P.argmax(axis=2)
+    Ecen = P @ ek / W
+    gap = 2 * np.abs(ek[nstar] - Ecen)
+
     if mode == 'dominant':
-        nstar = P.argmax(axis=2)
         E, O, L = ek[nstar], Oz[nstar], Lz[nstar]
     else:
-        E, O, L = P @ ek / W, P @ Oz / W, P @ Lz / W
+        E, O, L = Ecen, P @ Oz / W, P @ Lz / W
 
-    return E.T, O.T, L.T, P.max(axis=2).T
+    return E.T, O.T, L.T, P.max(axis=2).T, gap.T
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +216,9 @@ def assemble_extended(result, unf, setup, nk1, nk2, vb, vol_M, mode):
         new[f'Lz_{v}'] = (scatter_extended(unf[v]['Lz'], setup, nk1, nk2)
                           * 1e-20 * 1e3)
         new[f'wt_{v}'] = scatter_extended(unf[v]['wmax'], setup, nk1, nk2)
+        new[f'gap_{v}'] = scatter_extended(unf[v]['gap'], setup, nk1, nk2) * 1e3
 
+    new['vb'] = np.asarray(vb)[:2, :2]
     new['kpoints'] = extended_kmesh(setup, nk1, nk2, vb)
     new['nk1'] = ntile * nk1
     new['nk2'] = ntile * nk2

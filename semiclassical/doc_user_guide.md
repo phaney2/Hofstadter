@@ -27,8 +27,8 @@ bandstructure  →  onsager_bfield
 | calctype          | Reads from             | Produces                                           |
 |-------------------|------------------------|----------------------------------------------------|
 | `bandstructure`   | physics params         | E, Berry curvature, orbital moment, k-mesh          |
-| `isoenergy`       | `inputdata` (bs file)  | orbit areas, enclosed BC, dL/dE                    |
-| `onsager`         | `inputdata` (iso file) | Landau level fan diagrams                          |
+| `isoenergy`       | `inputdata` (bs file)  | orbit areas, enclosed BC, dL/dE (+ breakdown fields) |
+| `onsager`         | `inputdata` (iso file) | Landau level fan diagrams (+ level widths)         |
 | `onsager_bfield`  | `inputdata` (bs file)  | B-dependent orbits + LL fan (non-perturbative Lz)  |
 | `all` (default)   | physics params         | everything merged into one file                    |
 
@@ -72,6 +72,7 @@ MATLAB-style key = value format.  Lines starting with `%` are comments.
 | `extended_zone` | 0       | 1 = unfold the moire folding into the extended zone (zero-field only).  **Bandstructure stage only** — later stages read it from the data.  See below. |
 | `extended_ntile`| 3       | Odd, `≤ NQ`.  Side of the extended zone in moire BZs. |
 | `extended_mode` | `centroid` | `centroid` (breakdown-limit dispersion) or `dominant` (largest-weight state). |
+| `breakdown`     | 0       | 1 = Landau–Zener broadening of the semiclassical levels from the moire Bragg-plane gaps.  Needs an extended-zone band structure.  Set it at the **isoenergy** and **onsager** stages.  See below. |
 | `kT`            | 3       | Thermal broadening for dL/dE (meV) |
 | `iso_Erange`    | —       | `[emin emax]` (meV): restrict the isoenergy / `onsager_bfield` energy grids to this window instead of each band's full range. |
 | `Blist`         | —       | Magnetic field values (T) for Onsager quantization, e.g. `linspace(0,12,100)` |
@@ -311,7 +312,7 @@ from the input file, so a band structure written with `unfold = 1`
 carries its doubled mesh through the pipeline automatically.  See
 [Magnetic BZ unfolding](#magnetic-bz-unfolding-unfold--1).  The same holds
 for `extended_zone = 1`, which additionally sets `nbands = 2*Nlayers` and
-adds `wt_K` / `wt_Kp`; see
+adds `wt_K` / `wt_Kp`, `gap_K` / `gap_Kp` and `vb`; see
 [Extended-zone unfolding](#extended-zone-unfolding-extended_zone--1).
 
 ### Isoenergy output (present when `nE` is in input, or `calctype = isoenergy`)
@@ -331,6 +332,8 @@ band's energy range.
 | `enclosedBC_Kp_band{n}` | (nE, npockets)     | —       | K' valley enclosed Berry curvature |
 | `dL_dE_K_band{n}`       | (nE,)              | —       | K valley orbital moment derivative |
 | `dL_dE_Kp_band{n}`      | (nE,)              | —       | K' valley orbital moment derivative |
+| `B0_{v}_band{n}`        | (nE, ncmax)        | T       | Only with `breakdown = 1`: Landau–Zener field at each Bragg-plane crossing of the orbit, NaN-padded |
+| `mc_{v}_band{n}`        | (nE,)              | kg      | Only with `breakdown = 1`: cyclotron mass `(ħ²/2π)·abs(dA/dE)`, NaN where there is no orbit |
 
 Energy grids are per-valley: each valley uses `linspace(Emin, Emax, nE)`
 from its own bandwidth, so the `nE` energy points are concentrated
@@ -346,6 +349,8 @@ within the actual band range rather than spanning the union of both valleys.
 | `LL_{v}_band{i}_SB`        | (nB, nmax+1)        | meV     | + enclosed Berry curvature |
 | `LL_{v}_band{i}_SBM`       | (nB, nmax+1)        | meV     | + dL/dE orbital moment |
 | `LL_{v}_band{i}_SBMC`      | (nB, nmax+1)        | meV     | + chi' susceptibility (if data provided) |
+| `Gamma_{v}_band{i}`        | (nE, nB)            | meV     | Only with `breakdown = 1`: level width on the isoenergy grid |
+| `width_{v}_band{i}_{sfx}`  | (nB, nmax+1)        | meV     | Only with `breakdown = 1`: `Gamma` interpolated onto `LL_{v}_band{i}_{sfx}`; plot the level as `LL ± width/2` |
 
 where `{v}` is `K` or `Kp` and `{i}` is the 0-based band index.
 One set of suffixed matrices is saved per band that has closed orbits.
@@ -641,12 +646,20 @@ moire gaps in the band energies, run `extended_mode = dominant` — at the
 weak potential in the example that departs from the bare dispersion by up to
 10.4 meV, with jumps of order the gap (~12–15 meV) across the planes.
 
+`dominant` is a diagnostic, not a way to get the gaps into a Landau fan: it
+only moves the level where the orbit sits on a plane, which is an energy
+sample or two, and the fan comes out essentially unchanged.  The gaps enter
+the fan as a level *width* — see
+[Magnetic breakdown broadening](#magnetic-breakdown-broadening-breakdown--1).
+
 ### Effect on the output
 
 | Key | Change |
 |---|---|
 | `E_K`, `E_Kp`, `Oz_*`, `Lz_*` | shape `(2*Nlayers, ntile²*nk1*nk2)` — one row per **intrinsic branch**, ascending (bilayer: 0,1 = valence, 2,3 = conduction).  `bands` is ignored. |
 | `wt_K`, `wt_Kp` | new: largest single-state weight feeding the branch.  1 = one eigenstate carries that extended momentum; ~1/2 at a Bragg anticrossing, `1/N` at an `N`-fold symmetry point.  Dips mark the moire gaps and are expected. |
+| `gap_K`, `gap_Kp` | new (meV): `2·abs(E_dominant − E_centroid)`, a ridge of height `Eg` along each Bragg plane.  Computed in **both** modes; `breakdown = 1` reads it. |
+| `vb` | new: the two moire reciprocal lattice vectors, `(2, 2)` in Å⁻¹ |
 | `kpoints` | `(ntile²*nk1*nk2, 2)`, covering the extended zone |
 | `nk1`, `nk2` | each × `ntile` |
 | `vol_M` | ÷ `ntile²` |
@@ -691,6 +704,100 @@ fix, and `wt_*` is what tells you whether it holds.
 
 Run `python semiclassical/validate_extended_zone.py` after any change to
 `extended_zone.py` or the zero-field k-mesh.
+
+## Magnetic breakdown broadening (`breakdown = 1`)
+
+**Needs `extended_zone = 1`.**  Set `breakdown = 1` in the `isoenergy` input
+(which computes the Landau–Zener fields) and in the `onsager` input (which
+turns them into level widths).  Not supported by `onsager_bfield`.
+
+### What it is for
+
+An Onsager fan built on the extended zone ignores the small gaps that open at
+the moire BZ edge: `extended_mode = centroid` is the breakdown limit taken all
+the way, so the energies are exactly the moire-free dispersion and the fan
+reproduces a slightly perturbed bilayer.  `extended_mode = dominant` does not
+fix that — it moves the level only *on* the Bragg plane, which touches an
+energy sample or two and leaves the fan essentially unchanged.
+
+The gaps enter the fan as a **width**, not a shift.  A partly reflecting
+Bragg plane makes the round trip not quite close, and the level spreads:
+
+```
+Gamma(E, B) = (hbar*omega_c / 2*pi) * sum_i sqrt(1 - exp(-B0_i/B))
+B0 = pi*Eg^2 / (4*hbar*e*v_perp*v_par),   omega_c = eB/m_c
+```
+
+with `m_c = (ħ²/2π)|dA/dE|` from the orbit areas.  No free parameters.
+
+Against the exact Hofstadter spectrum (`main_v3.py` at `qq = 1`, 105 levels
+over 1.9–11.6 T) the median `w_exact/Gamma` is **0.83** — the width is 60–100%
+of the level spacing at 2–12 T, so this is not a small correction.
+
+`Gamma` is an **envelope**.  The exact widths oscillate by a factor of ~4 from
+level to level (coherent interference of the twelve crossings) and `Gamma`
+does not track that oscillation; it tracks the scale and its dependence on `E`
+and `B`.  Resolving the oscillation needs a Falicov–Stachowiak coupled-orbit
+network, which is not implemented.
+
+### Using it
+
+```
+# isoenergy stage
+calctype   = 'isoenergy'
+inputdata  = 'zf.mat'          # written with extended_zone = 1
+outputfile = 'zf_iso.mat'
+nE         = 1000
+iso_Erange = [-170 -100]
+breakdown  = 1
+
+# onsager stage
+calctype   = 'onsager'
+inputdata  = 'zf_iso.mat'
+outputfile = 'zf_onsager.mat'
+Blist      = linspace(2,12,100)
+nmax       = 60
+breakdown  = 1
+```
+
+The isoenergy stage prints the median crossing count and `B0` per band:
+
+```
+    band 1 K: E = [-170.00, -100.00] meV
+      breakdown: 12 Bragg crossings (median), B0 = 0.93 T (median)
+```
+
+Twelve is what the hexagonal moire BZ gives once the orbit is large enough to
+reach the Bragg planes; the count drops to zero for orbits smaller than the
+inradius (`A/A_BZ ≲ 0.89`), where there is nothing to tunnel through.
+
+In MATLAB, plot the level as a band rather than a dot:
+
+```matlab
+LL = results.LL_K_band1_SBM;  W = results.width_K_band1_SBM;
+for n = 1:size(LL,2)
+    fill([B; flipud(B)], [LL(:,n)-W(:,n)/2; flipud(LL(:,n)+W(:,n)/2)], ...
+         'b', 'FaceAlpha', 0.25, 'EdgeColor', 'none');
+end
+```
+
+### Caveats
+
+- `Gamma` uses the true `ħω_c = ħeB/m_c`.  At the default
+  `onsager_Bmultiplier = 4` the *fan's* level spacing is 4× that, so widths
+  and spacings are on different scales; use `onsager_Bmultiplier = 1` if you
+  want them comparable.
+- The gap is read off the discrete `gap_K` map, so `Gamma` is mesh-sensitive:
+  it moves ~4% (median; up to 10%) between `nk = 60` and `nk = 120`.
+- Errors if the band structure was not unfolded:
+
+```
+ValueError: breakdown = 1 needs an extended-zone band structure (missing
+gap_K, vb, extended_ntile).  ...
+```
+
+  Band structures written before `gap_K` existed will trigger this; re-run
+  the bandstructure stage.
 
 ## Hofstadter mode
 
