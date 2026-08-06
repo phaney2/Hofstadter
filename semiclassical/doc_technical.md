@@ -1185,6 +1185,69 @@ plots as `LL ± width/2`.  NaN wherever the corresponding `LL` is NaN.
 `onsager_bfield` does not support this; the widths are emitted by
 `run_onsager` only.
 
+### References
+
+The mechanism — a zone-boundary gap going transparent to a semiclassical
+orbit at high field, which is what `extended_mode = centroid` implements as
+an exact limit:
+
+- M. H. Cohen and L. M. Falicov, *Magnetic Breakdown in Crystals*, Phys.
+  Rev. Lett. **7**, 231 (1961).
+- E. I. Blount, *Bloch Electrons in a Magnetic Field*, Phys. Rev. **126**,
+  1636 (1962).  The derivation for Bloch electrons, the source of the
+  `ħω_c ≳ E_g²/E_F` criterion quoted under "Validity" above, and the
+  reference for the two-velocity form of `B0` used here (most secondary
+  accounts quote the `m* E_g²/(ħ e E_F)` shorthand instead, which loses the
+  `v_perp` / `v_par` distinction).
+- C. Zener, *Non-adiabatic crossing of energy levels*, Proc. R. Soc. Lond. A
+  **137**, 696 (1932); L. D. Landau, Phys. Z. Sowjetunion **2**, 46 (1932).
+  The tunnelling exponent itself.
+- D. Shoenberg, *Magnetic Oscillations in Metals*, Cambridge University
+  Press (1984), magnetic-breakdown chapter.  The most usable working
+  treatment of `B0`.
+
+Turning partial reflection into level structure.  **`Gamma` as computed here
+is not from any of these** — it is a round-trip-phase-perturbation estimate.
+The literature treatment of the same physics is the coupled-orbit network,
+whose output is a level *band*, and which keeps the coherent interference
+between crossings that the incoherent `sum sqrt(1-P)` discards:
+
+- A. B. Pippard, *Quantization of coupled orbits in metals*, Proc. R. Soc.
+  Lond. A **270**, 1 (1962), and *…II. The two-dimensional network, with
+  special reference to the properties of zinc*, Phil. Trans. R. Soc. Lond. A
+  **256**, 317 (1964).  Paper II is the closest published setting to this
+  one: a 2D periodic network of junctions with amplitudes `sqrt(P)` and
+  `sqrt(1-P)`, broadening the sharp level into a band.
+- W. G. Chambers, *Linear-Network Model for Magnetic Breakdown in Two
+  Dimensions*, Phys. Rev. **140**, A135 (1965).
+- L. M. Falicov and H. Stachowiak, *Theory of the de Haas–van Alphen Effect
+  in a System of Coupled Orbits.  Application to Magnesium*, Phys. Rev.
+  **147**, 505 (1966).  What would be needed for the ~4× level-to-level
+  oscillation; not implemented.
+- R. W. Stark and L. M. Falicov, *Magnetic Breakdown in Metals*, Prog. Low
+  Temp. Phys. **5**, 235 (1967).  Review; the single best entry point.
+
+Semiclassical quantization carrying the Berry phase, the orbital moment
+*and* the breakdown junctions together — i.e. what `onsager.py` and
+`breakdown.py` do jointly:
+
+- A. Alexandradinata and L. Glazman, *Semiclassical theory of Landau levels
+  and magnetic breakdown in topological metals*, Phys. Rev. B **97**, 144422
+  (2018).
+
+Moire context:
+
+- J. R. Wallbank *et al.*, *Generic miniband structure of graphene on a
+  hexagonal substrate*, Phys. Rev. B **87**, 245408 (2013).  The miniband
+  model this code uses.
+- R. Krishna Kumar *et al.*, *High-temperature quantum oscillations caused
+  by recurring Bloch states in graphene superlattices*, Science **357**, 181
+  (2017).  Breakdown physics measured in a graphene superlattice.
+
+When citing this calculation, the defensible framing is "an incoherent-sum
+estimate of the Pippard / Falicov–Stachowiak network bandwidth, good to
+~20% as an envelope", not "a calculation of the breakdown level width".
+
 ## Known considerations
 
 - `eigh` returns eigenvalues in ascending order (matches MATLAB `eig`

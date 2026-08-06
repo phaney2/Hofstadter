@@ -799,6 +799,25 @@ gap_K, vb, extended_ntile).  ...
   Band structures written before `gap_K` existed will trigger this; re-run
   the bandstructure stage.
 
+### Where the physics comes from
+
+Magnetic breakdown itself: Cohen & Falicov, Phys. Rev. Lett. **7**, 231
+(1961); Blount, Phys. Rev. **126**, 1636 (1962) — the latter is also the
+reference for the two-velocity `B0` used here.  The tunnelling exponent is
+Zener, Proc. R. Soc. Lond. A **137**, 696 (1932).  Review: Stark & Falicov,
+Prog. Low Temp. Phys. **5**, 235 (1967).
+
+The width `Gamma` is **not** taken from any of those — it is a round-trip
+phase-perturbation estimate.  The published treatment of the same physics is
+the coupled-orbit network of Pippard, Phil. Trans. R. Soc. Lond. A **256**,
+317 (1964) and Falicov & Stachowiak, Phys. Rev. **147**, 505 (1966), which
+gives a level *band* rather than a single width.  If you cite this
+calculation, call it an incoherent-sum estimate of that network bandwidth,
+good to ~20% as an envelope.
+
+Full list, with what each one underwrites, in the "Magnetic breakdown
+broadening" section of `doc_technical.md`.
+
 ## Hofstadter mode
 
 When `qq > 0` in the input file, the code switches to Hofstadter mode:

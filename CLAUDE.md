@@ -193,7 +193,10 @@ than re-parsing the source.
   uses the true `hbar*omega_c`, which is the fan's level spacing only at
   `onsager_Bmultiplier = 1`.  Set the flag at the `isoenergy` **and**
   `onsager` stages; it needs an extended-zone band structure and raises
-  without one.  `onsager_bfield` does not support it.
+  without one.  `onsager_bfield` does not support it.  Literature — and
+  which parts of it the implementation does *not* follow — under
+  "References" in the `breakdown.py` section of
+  `semiclassical/doc_technical.md`.
 - The basis label system (composite strings with `_` separators, searched
   via substring intersection) is load-bearing. Any change to label
   formatting will silently break `getindices` lookups.

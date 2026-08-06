@@ -41,6 +41,12 @@ interference of the several crossings, which an incoherent sum of reflection
 amplitudes cannot carry -- and the rank correlation between `w_exact` and
 `Gamma` within a field is near zero at low B.  Resolving the oscillation needs
 the full Falicov-Stachowiak coupled-orbit network, which this is not.
+
+Breakdown: Cohen & Falicov, PRL 7, 231 (1961); Blount, PR 126, 1636 (1962)
+(also the source of the two-velocity B0); review, Stark & Falicov, Prog. Low
+Temp. Phys. 5, 235 (1967).  Networks: Pippard, Phil. Trans. A 256, 317 (1964);
+Falicov & Stachowiak, PR 147, 505 (1966).  The `Gamma` above is in none of
+them.  Annotated list in `doc_technical.md`.
 """
 
 import numpy as np
