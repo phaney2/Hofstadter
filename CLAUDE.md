@@ -73,6 +73,7 @@ on hBN.  Four calculation modes:
 | `input.txt` | Example input with Onsager parameters |
 | `doc_technical.md` | Technical reference for the semiclassical code |
 | `doc_user_guide.md` | Input/output reference for the semiclassical code |
+| `notes_network_project.md` | **Plan, not implemented.** Brief for a future project: reconstruct the `1/q` magnetic Bloch bands from zero-field data via a Falicov–Stachowiak / Wilkinson orbit network |
 
 ## Before making changes
 
