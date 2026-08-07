@@ -27,6 +27,11 @@ from hamiltonian import (get_interbilayerterms_K, get_interbilayerterms_Kp,
 
 HBAR_EV = 6.582119569e-16  # eV*s
 
+# Below this level splitting (eV) a band pair is treated as degenerate
+# and dropped from the Gamma=0 Berry kernel.  Far below any resolvable
+# spectral gap, far above the roundoff scale of the velocity matrices.
+_DEGEN_TOL_EV = 1e-9
+
 
 # ---------------------------------------------------------------------------
 # Per-k-point solver (serial core + parallel wrapper)
@@ -181,7 +186,10 @@ def _build_eps_quadrature(all_mu, kT, Gamma_list, scba_grid, scba_Gamma,
 def _transport_kubo_single_k(E_meV, vx, vy, d):
     """Compute per-k-point contribution to transport sums.
 
-    Returns (sxx, sxy, l12xx, l12xy) each shape (n_gamma, n_mu).
+    Returns (sxx, sxy, l12xx, l12xy, K_n_0).  The first four have shape
+    (n_gamma, n_mu); K_n_0 is the per-band Gamma=0 Berry curvature
+    kernel (nb,), which the caller cumulates over the bands below a
+    spectral gap to get that gap's Chern number.
     Prefactors (magnetic cell area, 1/Nk) are applied in the caller.
 
     In SCBA mode (d['scba_Gamma_E'] is not None), sxx and l12xx include
@@ -220,7 +228,18 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
     E_xx = E[sub]
     vx_sq = np.abs(vx[np.ix_(sub, sub)]) ** 2
     Omega = np.imag(vx * np.conj(vy))
-    D2 = (E[:, None] - E[None, :]) ** 2
+    absD = np.abs(E[:, None] - E[None, :])
+    D2 = absD ** 2
+
+    # Gamma=0 Berry curvature kernel, for the Chern readout in gaps.
+    # Pairs closer than _DEGEN_TOL_EV are dropped along with the
+    # diagonal: a real gap is orders of magnitude wider, so such a pair
+    # always lies wholly on one side of it, where the antisymmetry of
+    # Omega cancels it exactly.  Keeping them would instead divide the
+    # roundoff-level non-Hermiticity of vx, vy by a vanishing D^2.
+    resolved = absD > _DEGEN_TOL_EV
+    K_n_0 = np.sum(np.where(resolved, Omega / np.where(resolved, D2, 1.0), 0.0),
+                   axis=1)
 
     n_mu = len(all_mu)
     sxx = np.zeros((n_gamma, n_mu))
@@ -282,7 +301,7 @@ def _transport_kubo_single_k(E_meV, vx, vy, d):
                     L = 1.0 / ((E_xx - mu) ** 2 + G2)
                     sxx[ig, i_mu] = L @ vx_sq @ L
 
-    return sxx, sxy, l12xx, l12xy
+    return sxx, sxy, l12xx, l12xy, K_n_0
 
 
 def _solve_scba(all_eigs_eV, Gamma0, pp, Nk, mixing=0.3, tol=1e-4,
@@ -432,6 +451,7 @@ def _solve_kpoint_transport_core(d, kpt):
     sxx_K = sxy_K = l12xx_K = l12xy_K = None
     sxx_Kp = sxy_Kp = l12xx_Kp = l12xy_Kp = None
     E_K = E_Kp = None
+    K0_K = K0_Kp = None
 
     if 'K' in d['valley']:
         tphase1 = np.exp(1j * (pp / qq) * kx_val * Lx)
@@ -448,7 +468,7 @@ def _solve_kpoint_transport_core(d, kpt):
         Psi_sel = Psi[:, band_sel]
         vx_K = Psi_sel.conj().T @ d['Vx_K'] @ Psi_sel
         vy_K = Psi_sel.conj().T @ d['Vy_K'] @ Psi_sel
-        sxx_K, sxy_K, l12xx_K, l12xy_K = _transport_kubo_single_k(
+        sxx_K, sxy_K, l12xx_K, l12xy_K, K0_K = _transport_kubo_single_k(
             E_K, vx_K, vy_K, d)
 
     if 'Kp' in d['valley']:
@@ -466,17 +486,60 @@ def _solve_kpoint_transport_core(d, kpt):
         Psi_sel = Psi[:, band_sel]
         vx_Kp = Psi_sel.conj().T @ d['Vx_Kp'] @ Psi_sel
         vy_Kp = Psi_sel.conj().T @ d['Vy_Kp'] @ Psi_sel
-        sxx_Kp, sxy_Kp, l12xx_Kp, l12xy_Kp = _transport_kubo_single_k(
+        sxx_Kp, sxy_Kp, l12xx_Kp, l12xy_Kp, K0_Kp = _transport_kubo_single_k(
             E_Kp, vx_Kp, vy_Kp, d)
 
-    return (sxx_K, sxy_K, l12xx_K, l12xy_K, E_K,
-            sxx_Kp, sxy_Kp, l12xx_Kp, l12xy_Kp, E_Kp)
+    return (sxx_K, sxy_K, l12xx_K, l12xy_K, E_K, K0_K,
+            sxx_Kp, sxy_Kp, l12xx_Kp, l12xy_Kp, E_Kp, K0_Kp)
 
 
 def _solve_kpoint_transport(args):
     kc, kpt = args
     r = _solve_kpoint_transport_core(_worker_shared, kpt)
     return (kc,) + r
+
+
+# ---------------------------------------------------------------------------
+# Transport: spectral gap detection
+# ---------------------------------------------------------------------------
+
+def _find_gaps(eig_arrays, nk1, nk2, gap_min):
+    """Find real spectral gaps from the stored transport eigenvalues.
+
+    eig_arrays is a list of (Nk, nb) band-sorted eigenvalue arrays (one
+    per valley).  A candidate gap between band columns j and j+1 exists
+    when max_k E_j < min_k E_{j+1} over all valleys; holes *within* a
+    band column are discretization artifacts by construction and never
+    counted.  A candidate is accepted as real when its width exceeds
+    both gap_min and the k-mesh energy resolution of the two adjacent
+    bands (the maximum eigenvalue change between neighboring mesh
+    points), which bounds the spurious gap a finite mesh can open by
+    missing a band extremum.
+
+    Returns (gaps, bands): an (n_gaps, 2) array of [lo, hi] edges in the
+    input units, and the index j of the band below each gap.
+    """
+    E_all = np.vstack(eig_arrays)
+    band_lo = E_all.min(axis=0)
+    band_hi = E_all.max(axis=0)
+
+    nb = E_all.shape[1]
+    mesh_err = np.zeros(nb)
+    for eigs in eig_arrays:
+        grid = eigs.reshape(nk1, nk2, nb)  # kc = i2 + nk2*i1
+        d1 = np.abs(np.diff(grid, axis=0)).max(axis=(0, 1)) if nk1 > 1 else 0.0
+        d2 = np.abs(np.diff(grid, axis=1)).max(axis=(0, 1)) if nk2 > 1 else 0.0
+        mesh_err = np.maximum(mesh_err, np.maximum(d1, d2))
+
+    gaps = []
+    bands = []
+    for j in range(nb - 1):
+        lo, hi = band_hi[j], band_lo[j + 1]
+        if hi - lo > max(gap_min, mesh_err[j], mesh_err[j + 1]):
+            gaps.append([lo, hi])
+            bands.append(j)
+    return (np.array(gaps, dtype=float).reshape(-1, 2),
+            np.array(bands, dtype=int))
 
 
 # ---------------------------------------------------------------------------
@@ -707,6 +770,7 @@ def do_calc(filepath):
         sigma_xx_buffer_meV = d.get('sigma_xx_buffer', None)
         eps_per_width = float(d.get('eps_per_width', 5.0))
         eps_grid_floor = float(d.get('eps_grid_floor', 0.05))
+        gap_min_meV = float(d.get('gap_min', 0.0))
         use_scba = broadening_mode == 'scba'
 
         if use_scba and len(Gamma_list_meV) > 1:
@@ -991,6 +1055,8 @@ def do_calc(filepath):
         nb_kubo = len(band_sel_kubo)
         eigs_K_all = np.zeros((Nk_tot, nb_kubo)) if 'K' in valley else None
         eigs_Kp_all = np.zeros((Nk_tot, nb_kubo)) if 'Kp' in valley else None
+        K0_K_all = np.zeros((Nk_tot, nb_kubo)) if 'K' in valley else None
+        K0_Kp_all = np.zeros((Nk_tot, nb_kubo)) if 'Kp' in valley else None
 
         pass_label = "transport, pass 2" if use_scba else "transport"
         print(f" Entering the k loop ({pass_label})")
@@ -1006,8 +1072,8 @@ def do_calc(filepath):
                 for b in bins:
                     dos_arr[b] += dos_weight
 
-        def _accumulate(kc, sxK, syK, l12xK, l12yK, eK,
-                        sxKp, syKp, l12xKp, l12yKp, eKp):
+        def _accumulate(kc, sxK, syK, l12xK, l12yK, eK, k0K,
+                        sxKp, syKp, l12xKp, l12yKp, eKp, k0Kp):
             nonlocal done_count, next_pct
             if sxK is not None:
                 sxx_K_acc[:, :] += sxK
@@ -1016,6 +1082,7 @@ def do_calc(filepath):
                 l12xy_K_acc[:, :] += l12yK
                 _bin_dos(eK, dos_K)
                 eigs_K_all[kc, :] = eK
+                K0_K_all[kc, :] = k0K
             if sxKp is not None:
                 sxx_Kp_acc[:, :] += sxKp
                 sxy_Kp_acc[:, :] += syKp
@@ -1023,6 +1090,7 @@ def do_calc(filepath):
                 l12xy_Kp_acc[:, :] += l12yKp
                 _bin_dos(eKp, dos_Kp)
                 eigs_Kp_all[kc, :] = eKp
+                K0_Kp_all[kc, :] = k0Kp
             done_count += 1
             pct = done_count * 100 // Nk_tot
             if pct >= next_pct:
@@ -1080,8 +1148,46 @@ def do_calc(filepath):
             G2_list = Gamma_list_eV ** 2
             pf_xx = 2.0 * HBAR_EV ** 2 * G2_list / (A_mag_Ang2 * Nk_tot)
 
+        # --- Spectral gaps and zero-broadening Chern numbers ---
+        # Summing K_n^0 over the bands below a gap equals the occupied x
+        # empty sum: the occupied-occupied terms cancel pairwise under
+        # the antisymmetry of Omega.  Every surviving denominator is then
+        # bounded below by the gap width, so no broadening regulator is
+        # needed and the result is the Chern number of the filled bands.
+        gap_eigs = [e for e in (eigs_K_all, eigs_Kp_all) if e is not None]
+        gaps_all, gap_bands_all = _find_gaps(gap_eigs, nk1, nk2, gap_min_meV)
+        in_win = (gaps_all[:, 1] > mu_min) & (gaps_all[:, 0] < mu_max)
+        gaps_meV = gaps_all[in_win]
+        gap_bands = gap_bands_all[in_win]
+        gap_centers_meV = 0.5 * (gaps_meV[:, 0] + gaps_meV[:, 1])
+        n_gaps = len(gaps_meV)
+
+        sigma_xy_gaps = {}
+        for v_label, K0_all in [('K', K0_K_all), ('Kp', K0_Kp_all)]:
+            if K0_all is None:
+                continue
+            cum = np.cumsum(K0_all.sum(axis=0))
+            sigma_xy_gaps[v_label] = (pf_xy * cum[gap_bands] if n_gaps
+                                      else np.array([]))
+
+        if n_gaps:
+            print(f"  Found {n_gaps} real gap(s) in "
+                  f"[{mu_min:.1f}, {mu_max:.1f}] meV "
+                  f"(zero-broadening sigma_xy, units e^2/h):")
+            for i, (glo, ghi) in enumerate(gaps_meV):
+                tot = sum(sg[i] for sg in sigma_xy_gaps.values())
+                per_v = "  ".join(f"{v}={sigma_xy_gaps[v][i]:8.4f}"
+                                  for v in sorted(sigma_xy_gaps))
+                print(f"    [{glo:8.2f}, {ghi:8.2f}] w={ghi - glo:6.2f}  "
+                      f"{per_v}  tot={tot:9.4f}  "
+                      f"|dev from int| = {abs(tot - round(tot)):.2e}")
+        else:
+            print(f"  No real gaps found in [{mu_min:.1f}, {mu_max:.1f}] meV")
+
         result = {'calctype': 'transport', 'params': inp,
-                  'mulist': mulist_meV, 'broadening': broadening_mode}
+                  'mulist': mulist_meV, 'broadening': broadening_mode,
+                  'gaps': gaps_meV, 'gap_centers': gap_centers_meV,
+                  'gap_bands': gap_bands}
         if n_gamma > 1:
             result['Gamma_list'] = Gamma_list_meV
         if use_scba:
@@ -1116,6 +1222,7 @@ def do_calc(filepath):
                 'L12_xy_K': l12xy_K_acc[:, :n_mu],
                 'dos_K': dos_K,
                 'dos_broad_K': dos_broad_K,
+                'sigma_xy_gaps_K': sigma_xy_gaps.get('K', np.array([])),
             }
             if n_gamma == 1:
                 for k in ('sigma_xx_K', 'sigma_xy_K', 'L12_xx_K', 'L12_xy_K',
@@ -1143,6 +1250,7 @@ def do_calc(filepath):
                 'L12_xy_Kp': l12xy_Kp_acc[:, :n_mu],
                 'dos_Kp': dos_Kp,
                 'dos_broad_Kp': dos_broad_Kp,
+                'sigma_xy_gaps_Kp': sigma_xy_gaps.get('Kp', np.array([])),
             }
             if n_gamma == 1:
                 for k in ('sigma_xx_Kp', 'sigma_xy_Kp', 'L12_xx_Kp',

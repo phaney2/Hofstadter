@@ -101,6 +101,7 @@ variables (e.g., `elist` can use `nebin`).
 | `mu_ref` | float (meV) | (none) | Reference chemical potential for sigma_xy (transport mode only). When set, sigma_xy is computed relative to this value: sigma_xy(mu_ref) = 0. Place in a spectral gap to get integer-quantized Hall conductivity in neighboring gaps. Applies to both valleys unless overridden below. |
 | `mu_ref_K` | float (meV) | value of `mu_ref` | Reference chemical potential for the K valley only. Use when the valleys are split and the reference gap sits at a different energy in each. Falls back to `mu_ref`; if neither is set, `sigma_xy_K` is left unreferenced. |
 | `mu_ref_Kp` | float (meV) | value of `mu_ref` | Same, for the K' valley. |
+| `gap_min` | float (meV) | `0.0` | Minimum width for a spectral gap to be reported (transport mode only). A gap is accepted only if it is wider than both this value and the k-mesh energy resolution of the two bands bounding it, so the default 0 already rejects gaps that are artifacts of a coarse mesh. Raise it to suppress narrow real gaps. |
 | `broadening` | string | `'constant'` | Broadening model: `'constant'` = fixed Lorentzian width, `'scba'` = self-consistent Born approximation (energy-dependent Γ(E)). |
 | `scba_mixing` | float | `0.3` | SCBA linear mixing parameter α (0 < α ≤ 1). Used for the first iteration and as fallback if Anderson mixing is singular. |
 | `scba_tol` | float | `1e-4` | SCBA convergence tolerance (relative max change in Γ). |
@@ -237,6 +238,11 @@ needed.
 | `sigma_xy_Kp` | (n_mu,) or (n_gamma, n_mu) | e²/h | Hall conductivity, K' valley |
 | `L12_xx_Kp` | (n_mu,) or (n_gamma, n_mu) | e²/h × eV | Longitudinal thermoelectric (L12), K' valley |
 | `L12_xy_Kp` | (n_mu,) or (n_gamma, n_mu) | e²/h × eV | Transverse thermoelectric (L12), K' valley |
+| `gaps` | (n_gaps, 2) | meV | `[lo, hi]` edges of each real spectral gap inside the mulist range |
+| `gap_centers` | (n_gaps,) | meV | Midpoint of each gap |
+| `gap_bands` | (n_gaps,) | -- | Index of the band below each gap, into the Kubo-selected band set |
+| `sigma_xy_gaps_K` | (n_gaps,) | e²/h | Zero-broadening, zero-temperature σ_xy in each gap = Chern number of the filled bands, K valley |
+| `sigma_xy_gaps_Kp` | (n_gaps,) | e²/h | Same, K' valley |
 | `broadening` | string | -- | Broadening model used: `'constant'` or `'scba'` |
 | `Gamma_E_grid` | (n_E,) | meV | Energy grid for SCBA Γ(E) (SCBA mode only) |
 | `Gamma_E` | (n_E,) | meV | Self-consistent broadening Γ(E) (SCBA mode only) |
@@ -247,7 +253,49 @@ When `Gamma` is a scalar (default), all transport arrays are 1D with shape
 values, transport arrays become 2D with shape `(n_gamma, n_mu)`.  The
 crude histogram DOS (`dos_K`, `dos_Kp`) is always 1D since it is
 Gamma-independent.  SCBA mode requires scalar Gamma (a list triggers a
-warning and only the first value is used as Γ₀).
+warning and only the first value is used as Γ₀).  The gap arrays
+(`gaps`, `gap_centers`, `gap_bands`, `sigma_xy_gaps_*`) are also always
+1D: they come from the eigenvalues and from the Γ = 0 Berry kernel, so
+neither the gaps nor the Chern numbers depend on `Gamma`.
+
+#### Gaps and Chern numbers
+
+Every run in transport mode also reports the real spectral gaps that
+fall inside the `mulist` range, and the zero-broadening,
+zero-temperature σ_xy in each one:
+
+```
+Found 10 real gap(s) in [-50.0, 100.0] meV (zero-broadening sigma_xy, units e^2/h):
+  [  -44.42,   -16.92] w= 27.50  K=  0.9991  tot=   0.9991  |dev from int| = 8.57e-04
+  [  -16.09,    -9.84] w=  6.25  K=  1.9990  tot=   1.9990  |dev from int| = 1.00e-03
+  [   -4.95,    -2.37] w=  2.58  K= -2.0009  tot=  -2.0009  |dev from int| = 8.63e-04
+  ...
+```
+
+A gap is a pair of adjacent band columns `j`, `j+1` with
+`max_k E_j < min_k E_{j+1}` over every valley computed, accepted when it
+is wider than both `gap_min` and the k-mesh energy resolution of the two
+bands.  With a filled band below and an empty one above, the Berry
+curvature sum needs no broadening regulator, so `sigma_xy_gaps_*` is the
+Chern number of the filled bands directly — an integer, up to k-mesh
+discretization error.
+
+`|dev from int|` in the printout is the diagnostic to watch: it is the
+k-mesh convergence error, and it is *not* uniform across gaps.  Narrow
+gaps concentrate Berry curvature into a small region of the zone and
+converge much more slowly than wide ones — in the case above, at
+`nk = 15` the eight gaps wider than 1.5 meV are integers to 3e-3 while
+the two below 1.1 meV are off by ~6e-2.  Raising the mesh to `nk = 21`
+brings every gap within 7e-3.  Raise `nk1`/`nk2` if you need the narrow
+ones, or `gap_min` if you don't.
+
+This is independent of `mu_ref`: the gap values are absolute Chern
+numbers, not differences, and no reference is needed to get integers —
+provided `transport_buffer` is large enough for the remote-band sum to
+converge, which is the same requirement the finite-Γ `sigma_xy` already
+has.  The two routes are independent, so comparing them is a real check:
+at the gap centres above they agree to better than 2e-3 wherever the
+mesh has converged.
 
 Two DOS outputs are included: `dos_K`/`dos_Kp` is a crude eigenvalue
 histogram (states per primitive moire cell per mulist bin, weight

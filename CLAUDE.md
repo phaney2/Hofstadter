@@ -11,7 +11,9 @@ on hBN.  Four calculation modes:
    psi_conj=1) with Nq=qq.  Supports `calctype = 'ek'` (band structure),
    `'dos'` (density of states), and `'transport'` (Kubo-formula linear
    response transport coefficients: sigma_xx, sigma_xy, L12_xx, L12_xy
-   vs mu).
+   vs mu).  Transport runs also report the real spectral gaps in the
+   mulist range and the zero-broadening sigma_xy in each — the Chern
+   number of the bands below it, needing no `mu_ref`.
    Supports constant broadening or SCBA (self-consistent Born
    approximation) for energy-dependent broadening that captures
    localization-induced σ_xx suppression in narrow subbands.
@@ -230,6 +232,18 @@ For DOS/transport normalization and k-zone changes, run
 `python validate_transport_norm.py` — checks minimal-zone vs full-zone
 equivalence (machine precision), same-B invariance ((pp,qq) vs
 (2pp,2qq)), and exact state counting.  All tests must PASS.
+**This file is currently missing from the working tree and was never
+tracked** — it needs to be rewritten before that check can be run.
+
+For gap detection and the Γ=0 Chern readout, run
+`python test_gap_chern.py` (untracked): quantization in wide gaps,
+cross-check against the finite-Γ σ_xy channel, monotone k-mesh
+convergence over nk = 6/10/15/21, and that no eigenvalues lie inside a
+detected gap.  All four must PASS.  For `mu_ref`, run
+`python test_mu_ref_valley.py` (untracked) — its first group diffs the
+finite-Γ outputs against `git show HEAD:main_v3.py` and requires
+`max|diff| == 0`, so it doubles as a regression guard for any change to
+the transport k-loop.
 
 ### Zero-field
 
@@ -408,6 +422,39 @@ function, so the thermal integrals collapse to
 `Σ_n K_n f(E_n−μ)`) and are independent of all three.  Run
 `python validate_transport_kubo.py` after touching any of them — it
 reruns a case with all three tightened and reports the difference.
+
+## Transport: gaps and the Γ=0 Chern readout
+
+Every transport run reports the real spectral gaps inside the `mulist`
+range (`gaps`, `gap_centers`, `gap_bands`) and the zero-broadening,
+zero-temperature σ_xy in each (`sigma_xy_gaps_K`/`_Kp`) — the Chern
+number of the filled bands.  A gap is a pair of adjacent band *columns*
+with `max_k E_j < min_k E_{j+1}` in every valley, accepted when wider
+than both `gap_min` (default 0) and the k-mesh energy resolution of the
+two bands, so the default already rejects mesh artifacts.
+
+The readout is **not** a second pass over the k-mesh, which is what the
+earlier, reverted implementation of this feature required (the occupied
+× empty sum needs the gaps, which are not known until the loop ends).
+Each k-point instead returns the *unrestricted* per-band kernel
+`K_n^0 = Σ_{m≠n} Ω_nm/D_nm²` alongside the finite-Γ coefficients — Ω and
+D² are already in hand there, so it is nearly free — and
+`cumsum(K0.sum(axis=0))[gap_bands]` reads off the gap values afterwards.
+The unrestricted sum equals the restricted one because Ω is
+antisymmetric: occupied–occupied terms cancel pairwise, taking their
+small-D pairs with them.  Pairs closer than `_DEGEN_TOL_EV = 1e-9` eV
+are masked; dropping them is exact for the same reason, since a real gap
+is far wider than the tolerance.
+
+Independent of `mu_ref` and needing no reference to give integers, but
+subject to the same `transport_buffer` requirement.  Deviation from an
+integer is k-mesh error and is **strongly width-dependent** — narrow
+gaps converge much later.  At `(pp,qq) = (3,1)`, `v0=21`, `v1=29`: worst
+deviation over all gaps 4.6e-1 → 2.0e-1 → 6.3e-2 → 7.4e-3 for
+nk = 6, 10, 15, 21.  Cross-check against the finite-Γ σ_xy at the gap
+centres to tell mesh error from a kernel bug: the two routes agree to
+7e-3 even where the value is not yet an integer.  `test_gap_chern.py`
+(untracked) runs all of this.
 
 ## What not to do
 

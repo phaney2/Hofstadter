@@ -582,7 +582,12 @@ far sooner than the 1/D² Berry-curvature tail that sets
 The eigenvalues are histogrammed into a
 crude DOS (`dos_K`, `dos_Kp`) on the mulist energy grid (same binning as
 `calctype = 'dos'`) at no extra cost, since the diagonalization is
-already required for the transport calculation.
+already required for the transport calculation.  They are also retained
+in full as `eigs_K_all` / `eigs_Kp_all`, shape `(Nk, nb)`, for the gap
+detection below.  Note the histogram snaps each eigenvalue to the
+*nearest* mulist point, so a band extremum sitting on a gap edge is
+binned up to half a grid spacing inside the gap; `dos_K` is not a
+reliable test of where the gaps are.
 
 After the k-loop, a Lorentzian-broadened DOS (`dos_broad_K`,
 `dos_broad_Kp`) is computed on the mulist grid using all Kubo-selected
@@ -785,6 +790,100 @@ sigma_xy_Kp` is offset by the sum of two different integers.  The
 summed curve therefore has no single reference chemical potential and
 cannot be read as a Chern staircase off a common zero; only the
 per-valley curves can.
+
+### Spectral gaps and the Gamma = 0 Chern readout
+
+Every transport run also reports the real spectral gaps inside the
+`mulist` range and the zero-broadening, zero-temperature sigma_xy in
+each — the Chern number of the bands below it.  Output keys `gaps`,
+`gap_centers`, `gap_bands`, `sigma_xy_gaps_K`, `sigma_xy_gaps_Kp`.
+
+**Gap detection** (`_find_gaps`).  The eigenvalues are already retained
+per k-point as `eigs_K_all` / `eigs_Kp_all`, shape `(Nk, nb)`,
+band-sorted.  A candidate gap sits between adjacent band *columns* `j`
+and `j+1` when `max_k E_j < min_k E_{j+1}`, taken over every valley
+computed — so a gap is only reported where it is open in all of them.
+Working by column means holes *inside* a single band column are never
+counted; those are discretization artifacts by construction.
+
+A candidate is accepted when its width exceeds `gap_min` **and** the
+k-mesh energy resolution of both adjacent bands, defined as the largest
+eigenvalue change between neighbouring mesh points,
+
+```
+mesh_err[n] = max over the mesh of |E_n(k+dk1) - E_n(k)|, |E_n(k+dk2) - E_n(k)|
+```
+
+which bounds how wide a spurious gap the mesh can open by stepping over
+a band extremum.  This is why `gap_min = 0` is a usable default.  The
+reshape `eigs.reshape(nk1, nk2, nb)` relies on the `order='F'`
+flattening of the k-mesh (`kc = i2 + nk2*i1`) — see §5.
+
+**The Chern readout.**  In a gap the Kubo sigma_xy is the occupied x
+empty double sum
+
+```
+C = pf_xy * sum_{n occ} sum_{m empty} Omega_nm / D_nm^2
+```
+
+whose denominators are all bounded below by the gap width, so it needs
+no broadening regulator.  Restricting `m` to empty bands would require
+knowing the gaps before the k-loop, which they are not — the old
+implementation of this feature paid for that with a second pass over
+the k-mesh.  Instead each k-point returns the unrestricted per-band
+kernel
+
+```
+K_n^0 = sum_{m != n} Omega_nm / D_nm^2
+```
+
+alongside the finite-Gamma coefficients (`_transport_kubo_single_k`
+returns it as a fifth element; `Omega` and `D2` are already in hand
+there, so it is nearly free), accumulated into `K0_K_all` /
+`K0_Kp_all`.  After the loop, `cumsum(K0_all.sum(axis=0))[gap_bands]`
+gives the gap values in one shot.  The unrestricted sum equals the
+restricted one because `Omega` is antisymmetric: the occupied-occupied
+terms cancel pairwise, and the divergent small-`D` pairs they contain
+cancel with them.
+
+**Degeneracies.**  Pairs closer than `_DEGEN_TOL_EV = 1e-9` eV are
+masked out along with the diagonal.  Dropping them is exact, not an
+approximation: any real gap is orders of magnitude wider than the
+tolerance, so a degenerate pair always lies wholly on one side of it,
+where the antisymmetry above cancels it anyway.  Keeping them would
+instead divide the roundoff-level non-Hermiticity of `vx`, `vy` by a
+vanishing `D^2`.
+
+**Relation to `mu_ref`.**  The two are independent and neither needs the
+other.  Referencing removes the remote-band offset by subtraction; the
+gap readout never incurs it in the first place, because it sums the
+kernel over exactly the bands below the gap.  The remaining caveat is
+the same one `transport_buffer` addresses: the sum over `m` runs only
+over retained bands, so the buffer must be wide enough for the 1/D^2
+tail to converge.  Any residual is an *integer* offset — the retained
+set is a set of bands, and its Chern number is quantized regardless —
+so quantization alone does not prove the buffer is adequate.
+
+**Convergence.**  The deviation from an integer is k-mesh error and is
+strongly width-dependent: narrow gaps concentrate Berry curvature and
+converge much later than wide ones.  Measured at `(pp,qq) = (3,1)`,
+`v0 = 21`, `v1 = 29`, K valley, worst deviation over all gaps found:
+
+| nk | gaps | worst deviation |
+|---|---|---|
+| 6 | 8 | 4.6e-1 |
+| 10 | 9 | 2.0e-1 |
+| 15 | 10 | 6.3e-2 |
+| 21 | 11 | 7.4e-3 |
+
+At `nk = 15` the eight gaps wider than 1.5 meV are integers to 3.1e-3
+while the two below 1.1 meV carry the 6e-2; by `nk = 21` every gap
+found, narrow ones included, is within 7.4e-3.  The finite-Gamma sigma_xy
+at the same gap centres agrees with the Gamma = 0 value to 7e-3
+everywhere — including at the unconverged narrow gaps, where both
+routes give the *same* non-integer.  That agreement is the diagnostic:
+it separates mesh error from a defect in the kernel.  `test_gap_chern.py`
+(untracked) runs these checks.
 
 ### Gamma → 0 limit
 
