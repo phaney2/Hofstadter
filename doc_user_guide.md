@@ -98,7 +98,9 @@ variables (e.g., `elist` can use `nebin`).
 | `Gamma` | float or array (meV) | `1.0` | Broadening parameter (transport mode only). Scalar or list of values. In constant mode: Lorentzian half-width(s); when a list is given, transport coefficients are computed for each Γ value at negligible extra cost (the expensive diagonalization runs once). In SCBA mode: disorder strength Γ₀ (must be scalar). |
 | `transport_buffer` | float (meV) | max(mulist range, 500) | Energy buffer beyond mulist range for Kubo band selection. Must be large enough to include remote bands that contribute to the Berry curvature sum. Default: max of mulist width and 500 meV. |
 | `kT` | float (meV) | `0.0` | Thermal energy for Fermi-Dirac occupation (transport mode only). 0 = zero temperature (step function). |
-| `mu_ref` | float (meV) | (none) | Reference chemical potential for sigma_xy (transport mode only). When set, sigma_xy is computed relative to this value: sigma_xy(mu_ref) = 0. Place in a spectral gap to get integer-quantized Hall conductivity in neighboring gaps. |
+| `mu_ref` | float (meV) | (none) | Reference chemical potential for sigma_xy (transport mode only). When set, sigma_xy is computed relative to this value: sigma_xy(mu_ref) = 0. Place in a spectral gap to get integer-quantized Hall conductivity in neighboring gaps. Applies to both valleys unless overridden below. |
+| `mu_ref_K` | float (meV) | value of `mu_ref` | Reference chemical potential for the K valley only. Use when the valleys are split and the reference gap sits at a different energy in each. Falls back to `mu_ref`; if neither is set, `sigma_xy_K` is left unreferenced. |
+| `mu_ref_Kp` | float (meV) | value of `mu_ref` | Same, for the K' valley. |
 | `broadening` | string | `'constant'` | Broadening model: `'constant'` = fixed Lorentzian width, `'scba'` = self-consistent Born approximation (energy-dependent Γ(E)). |
 | `scba_mixing` | float | `0.3` | SCBA linear mixing parameter α (0 < α ≤ 1). Used for the first iteration and as fallback if Anderson mixing is singular. |
 | `scba_tol` | float | `1e-4` | SCBA convergence tolerance (relative max change in Γ). |
@@ -498,6 +500,42 @@ kT = 1.0;
 mu_ref = 16.0;
 outputfile = 'transport_scba_p3_q1.mat';
 ```
+
+### Transport with a valley-dependent reference
+
+```
+isparallel = 1;
+theta = 0.0;
+qq = 1;
+pp = 3;
+g0 = 2796;
+g1 = 340;
+g3 = 0;
+g4 = 0;
+delta = 0;
+v0 = 30;
+v1 = 21;
+w = 110;
+eta = 2;
+U = 0*[1 1];
+nk1 = 10;
+nk2 = 10;
+LL_multiplier = 6;
+Nmax = 1000;
+calctype = 'transport';
+valley = {'K', 'Kp'};
+mulist = linspace(-100, 100, 400);
+Gamma = 2.0;
+kT = 1.0;
+mu_ref_K = 16.0;
+mu_ref_Kp = 24.0;
+outputfile = 'transport_valleyref_p3_q1.mat';
+```
+
+Each valley's `sigma_xy` is referenced to its own gap.  Note that
+`sigma_xy_K + sigma_xy_Kp` is then offset by the sum of two different
+integers, so the summed curve has no single reference chemical
+potential — see the technical note on reference subtraction.
 
 ### Zero-field bilayer (matching MATLAB benchmark)
 

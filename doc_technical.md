@@ -760,6 +760,32 @@ unphysical remote-band contribution cancelling exactly.  L12_xy is
 similarly referenced.  sigma_xx and L12_xx are not referenced (they are
 already well-behaved).
 
+#### Valley-dependent references
+
+`mu_ref_K` and `mu_ref_Kp` override `mu_ref` for a single valley, for
+the case where the valleys are split and the reference gap sits at a
+different energy in each.  Resolution is per valley: use
+`mu_ref_<valley>` if given, else `mu_ref`, else leave that valley
+unreferenced.  A valley not present in `valley` is skipped entirely.
+
+The references are carried as extra columns appended to the Kubo mu
+grid (`all_mu`), tracked by `ref_col_K` / `ref_col_Kp`; each valley
+subtracts its own column.  When both valleys resolve to the same
+reference the column is shared, so the common scalar-`mu_ref` case
+costs exactly one extra mu evaluation, as before.  The subtraction is
+applied after the prefactors, so it is unaffected by them.
+
+Named scalars rather than a two-element array: `valley` is an unordered
+cell, so a positional array has no ordering to bind to, and an array
+`Gamma` already means "sweep these values, add an `n_gamma` axis" —
+a different meaning for the same syntax in the same calctype.
+
+**Caveat.** With different references per valley, `sigma_xy_K +
+sigma_xy_Kp` is offset by the sum of two different integers.  The
+summed curve therefore has no single reference chemical potential and
+cannot be read as a Chern staircase off a common zero; only the
+per-valley curves can.
+
 ### Gamma → 0 limit
 
 sigma_xy reduces to the TKNN/Chern number formula.  Quantized plateaus

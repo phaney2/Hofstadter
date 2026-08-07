@@ -694,6 +694,8 @@ def do_calc(filepath):
         Gamma_list_meV = np.atleast_1d(np.asarray(Gamma_input, dtype=float))
         transport_buffer_meV = d.get('transport_buffer', None)
         mu_ref_meV = d.get('mu_ref', None)
+        mu_ref_K_meV = d.get('mu_ref_K', mu_ref_meV)
+        mu_ref_Kp_meV = d.get('mu_ref_Kp', mu_ref_meV)
         kT_meV = float(d.get('kT', 0.0))
         broadening_mode = str(d.get('broadening', 'constant')).strip("'\"")
         scba_mixing = float(d.get('scba_mixing', 0.3))
@@ -717,7 +719,10 @@ def do_calc(filepath):
 
         mulist_eV = mulist_meV / 1000.0
         kT_eV = kT_meV / 1000.0
-        mu_ref_eV = float(mu_ref_meV) / 1000.0 if mu_ref_meV is not None else None
+        mu_ref_K_eV = (float(mu_ref_K_meV) / 1000.0
+                       if mu_ref_K_meV is not None else None)
+        mu_ref_Kp_eV = (float(mu_ref_Kp_meV) / 1000.0
+                        if mu_ref_Kp_meV is not None else None)
         J_to_eV = 1.0 / Q_E
         m_to_Ang = 1e10
         # Each k-point's spectrum holds exactly one magnetic unit cell's
@@ -836,11 +841,20 @@ def do_calc(filepath):
             Vx_Kp = (1j / HBAR_EV) * (Ax_full_Kp @ H_eV_Kp - H_eV_Kp @ Ax_full_Kp)
             Vy_Kp = (1j / HBAR_EV) * (Ay_full_Kp @ H_eV_Kp - H_eV_Kp @ Ay_full_Kp)
 
-        # --- Build mu list for Kubo (including mu_ref if set) ---
+        # --- Build mu list for Kubo (per-valley mu_ref appended after it) ---
+        # Each valley's reference gets its own column; a shared mu_ref
+        # reuses one column, so the common case costs nothing extra.
         all_mu = list(mulist_eV)
-        compute_ref = mu_ref_eV is not None
-        if compute_ref:
-            all_mu.append(mu_ref_eV)
+        ref_col_K = ref_col_Kp = None
+        if 'K' in valley and mu_ref_K_eV is not None:
+            ref_col_K = len(all_mu)
+            all_mu.append(mu_ref_K_eV)
+        if 'Kp' in valley and mu_ref_Kp_eV is not None:
+            if ref_col_K is not None and mu_ref_Kp_eV == mu_ref_K_eV:
+                ref_col_Kp = ref_col_K
+            else:
+                ref_col_Kp = len(all_mu)
+                all_mu.append(mu_ref_Kp_eV)
         all_mu = np.array(all_mu)
         n_all = len(all_mu)
 
@@ -1077,8 +1091,10 @@ def do_calc(filepath):
                 'scba_niter': scba_niter,
             })
 
-        if compute_ref:
-            print(f"  Reference mu = {mu_ref_meV} meV (sigma_xy = 0 here)")
+        if ref_col_K is not None:
+            print(f"  Reference mu (K)  = {mu_ref_K_meV} meV (sigma_xy = 0 here)")
+        if ref_col_Kp is not None:
+            print(f"  Reference mu (Kp) = {mu_ref_Kp_meV} meV (sigma_xy = 0 here)")
 
         if 'K' in valley:
             sxy_K_acc *= pf_xy
@@ -1089,9 +1105,10 @@ def do_calc(filepath):
             else:
                 sxx_K_acc *= pf_xx[:, None]
                 l12xx_K_acc *= pf_xx[:, None]
-            if compute_ref:
-                sxy_K_acc[:, :n_mu] -= sxy_K_acc[:, n_mu:n_mu+1]
-                l12xy_K_acc[:, :n_mu] -= l12xy_K_acc[:, n_mu:n_mu+1]
+            if ref_col_K is not None:
+                rc = ref_col_K
+                sxy_K_acc[:, :n_mu] -= sxy_K_acc[:, rc:rc+1]
+                l12xy_K_acc[:, :n_mu] -= l12xy_K_acc[:, rc:rc+1]
             out_K = {
                 'sigma_xx_K': sxx_K_acc[:, :n_mu],
                 'sigma_xy_K': sxy_K_acc[:, :n_mu],
@@ -1115,9 +1132,10 @@ def do_calc(filepath):
             else:
                 sxx_Kp_acc *= pf_xx[:, None]
                 l12xx_Kp_acc *= pf_xx[:, None]
-            if compute_ref:
-                sxy_Kp_acc[:, :n_mu] -= sxy_Kp_acc[:, n_mu:n_mu+1]
-                l12xy_Kp_acc[:, :n_mu] -= l12xy_Kp_acc[:, n_mu:n_mu+1]
+            if ref_col_Kp is not None:
+                rc = ref_col_Kp
+                sxy_Kp_acc[:, :n_mu] -= sxy_Kp_acc[:, rc:rc+1]
+                l12xy_Kp_acc[:, :n_mu] -= l12xy_Kp_acc[:, rc:rc+1]
             out_Kp = {
                 'sigma_xx_Kp': sxx_Kp_acc[:, :n_mu],
                 'sigma_xy_Kp': sxy_Kp_acc[:, :n_mu],
