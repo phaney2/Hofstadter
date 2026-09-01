@@ -1,7 +1,7 @@
 # CLAUDE.md — Development Mode
 
-This project computes moire band structures for mono- or bilayer graphene
-on hBN.  Four calculation modes:
+This project computes moire band structures for mono-, bi-, or ABC-stacked
+trilayer graphene on hBN.  Four calculation modes:
 
 1. **Hofstadter** (`main_v3.py`): Magnetic Bloch bands in a Landau-level
    basis.  The physical flux per **primitive** moire cell is qq/(2*pp);
@@ -19,7 +19,13 @@ on hBN.  Four calculation modes:
    localization-induced σ_xx suppression in narrow subbands.
    Legacy driver `main_v2.py` is kept for reference.
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
-   expansion along a k-path through the moire BZ.
+   expansion along a k-path through the moire BZ.  Supports `nlayers = 3`
+   with ABC (rhombohedral) stacking: layers 1-2 and 2-3 each couple through
+   the same gamma1/v3 interlayer operator (identical bond geometry at every
+   step of the chain, the defining feature of chiral/ABC stacking); there
+   is no direct layer1-layer3 coupling.  `U` takes a 3-element
+   `[U_top, U_mid, U_bot]` array.  Only implemented for the zero-field
+   engine, not Hofstadter or semiclassical.
 3. **Semiclassical** (`semiclassical/`): Full BZ k-mesh band structure
    plus Berry curvature, orbital moment, Fukuyama susceptibility, and
    Onsager semiclassical quantization (Landau level fan diagrams).
@@ -122,7 +128,9 @@ than re-parsing the source.
   Type 2 (A1-B2) puts `Hinter` in the upper-right; Type 1 (B1-A2) swaps
   the off-diagonal blocks.  See Moon & Koshino, PRB 90, 155406 (2014),
   Eqs. 25 and B1.  This applies to `main_v3.py`, `zerofield.py`, and the
-  semiclassical code (`bandstructure.py`, `hofstadter_system.py`).
+  semiclassical code (`bandstructure.py`, `hofstadter_system.py`).  For
+  `zerofield.py` with `nlayers = 3`, the same `stacking_type` choice is
+  applied to both interlayer bonds (1-2 and 2-3) identically.
 - **Minimal magnetic k-zone**: `main_v3.py` and the semiclassical
   Hofstadter mode both sample `[b1/pp, qfac*b2/pp]` with
   `qfac = gcd(2*pp, qq)` — the smallest zone on which all

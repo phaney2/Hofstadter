@@ -1,6 +1,8 @@
 # User Guide
 
-Moire band structure solvers for mono- or bilayer graphene on hBN.
+Moire band structure solvers for mono-, bi-, or ABC-stacked trilayer
+graphene on hBN.  Trilayer (`nlayers = 3`) is supported by the zero-field
+engine only.
 
 Two calculation modes:
 
@@ -134,13 +136,13 @@ the difference in each transport coefficient.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `nlayers` | int | `2` | 1 = monolayer, 2 = bilayer |
+| `nlayers` | int | `2` | 1 = monolayer, 2 = bilayer, 3 = ABC-stacked trilayer |
 | `theta` | float (deg) | `0.0` | Twist angle between graphene and hBN |
-| `U` | array (meV) | `[0 0]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer |
+| `U` | array (meV) | `[0 0]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer, `[top, mid, bottom]` for trilayer. A shorter array is padded by repeating its last element. |
 | `NQ` | int | `7` | Q-vector grid size per direction (total: NQ^2 plane waves) |
 | `dk` | float (1/A) | `5e-4` | k-point spacing along the path |
 | `valley` | cell | `{'K', 'Kp'}` | Which valleys to compute |
-| `stacking_type` | int | `2` | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). Ignored for monolayer. |
+| `stacking_type` | int | `2` | Interlayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). Ignored for monolayer. For trilayer (`nlayers = 3`, ABC stacking) the same choice is applied identically to both interlayer bonds (1-2 and 2-3). |
 | `moire_psi` | float (rad) | `0.29` | Moire coupling phase psi. |
 | `outputfile` | string | `bands_zerofield.npz` | Output filename |
 
@@ -334,8 +336,9 @@ low flux where subbands are narrower than Γ₀.  Set
 | `tick_labels_Kp` | (4,) | -- | Labels: K2, K1, G, K2 |
 | `dim` | int | -- | Hamiltonian dimension |
 
-where `NT` is the total number of k-points and `dim = 2*NQ^2` (monolayer)
-or `4*NQ^2` (bilayer).  Multiply eigenvalues by 1000 for meV.
+where `NT` is the total number of k-points and
+`dim = nlayers * 2*NQ^2` (`2*NQ^2` monolayer, `4*NQ^2` bilayer, `6*NQ^2`
+trilayer).  Multiply eigenvalues by 1000 for meV.
 
 ---
 
@@ -616,6 +619,24 @@ NQ = 7;
 dk = 5e-4;
 valley = {'K', 'Kp'};
 outputfile = 'bands_zerofield.mat';
+```
+
+### Zero-field ABC trilayer
+
+```
+theta = 1.0;
+nlayers = 3;
+g0 = 2472;
+hbar_vF = 5.2657;
+g1 = 340;
+g3 = 0;
+v0 = 29.8;
+v1 = 21;
+U = [0 0 0];
+NQ = 7;
+dk = 5e-4;
+valley = {'K', 'Kp'};
+outputfile = 'bands_zerofield_trilayer.mat';
 ```
 
 ---

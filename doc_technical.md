@@ -1,7 +1,7 @@
 # Technical Documentation
 
-Moire band structure solvers for mono- or bilayer graphene on hexagonal
-boron nitride (hBN).  Two calculation modes:
+Moire band structure solvers for mono-, bi-, or ABC-stacked trilayer
+graphene on hexagonal boron nitride (hBN).  Two calculation modes:
 
 1. **Hofstadter** (`main_v3.py`): Magnetic Bloch bands in a Landau-level
    basis at rational magnetic flux `qq/pp` per moire unit cell.
@@ -1052,6 +1052,73 @@ H = H_intra(k) + H_hopp + U * I
 
 Single Dirac cone plus moire potential.  Dimension: `2 * NG`.
 
+### ABC-stacked trilayer (`nlayers = 3`)
+
+Layers are indexed 1 (top) - 2 (middle) - 3 (bottom, adjacent to hBN).
+ABC (rhombohedral) stacking means each consecutive layer is shifted in
+the same rotational sense as the previous one, so the interlayer bond
+geometry is identical at every step of the chain: the same `gamma1`
+dimer coupling + `hbar_v3` trigonal-warping operator `U_BLG(k)` (see
+`hamiltonian.py`'s bilayer operator, reused unchanged) couples layers
+1-2 and layers 2-3.  There is no direct layer-1-3 coupling (no `gamma2`
+term) — this is a minimal nearest-layer-only extension of the bilayer
+model, not a full tight-binding-parameter trilayer model.
+
+Two stacking configurations, selected by `stacking_type` (default 2),
+applied identically to both bonds:
+
+**Type 2 (default):**
+```
+H = [ H1(k)          U12(k)^dag      0              ]
+    [ U12(k)         H2(k)           U23(k)^dag     ]
+    [ 0              U23(k)          H3(k) + H_hopp ]
+```
+
+**Type 1:**
+```
+H = [ H1(k)          U12(k)          0              ]
+    [ U12(k)^dag     H2(k)           U23(k)         ]
+    [ 0              U23(k)^dag      H3(k) + H_hopp ]
+```
+
+- `H1/H2/H3`: block-diagonal Dirac Hamiltonians, one 2x2 block per
+  Q-vector: `-hbar_vF * (k - Q) . sigma + U_{top/mid/bot} * I`
+- `U12`, `U23`: identical interlayer coupling operator (gamma1 dimer +
+  v3 trigonal warping), one per bond
+- `H_hopp`: k-independent hBN moire potential, acting on the bottom
+  layer only (layer 3, nearest the substrate)
+- Dimension: `6 * NG`
+
+`U` is a 3-element array `[U_top, U_mid, U_bot]` (meV).  As with
+bilayer, a shorter array is padded by repeating its last element.
+
+Validated two ways, neither against an external benchmark (none exists
+for this mode):
+
+1. **Chiral/particle-hole symmetry**, against the existing
+   (MATLAB-benchmarked) bilayer construction: with `v0 = v1 = 0` (no
+   moire potential, which is not chiral) the trilayer spectrum satisfies
+   `E_n = -E_{dim+1-n}` to machine precision at every k-point, matching
+   the same check on bilayer.  Expected for chiral (ABC) stacking with
+   only `gamma1`/`gamma3` coupling and no `gamma2`/`gamma4`/onsite terms.
+
+2. **Cubic chiral dispersion**, against the known ABC N-layer low-energy
+   effective Hamiltonian (Guinea, Castro Neto & Peres, PRB 73, 245426
+   (2006); Koshino & McCann, PRB 80, 165409 (2009); Zhang, Sahu, Min &
+   MacDonald, PRB 82, 035409 (2010); reviewed in McCann & Koshino, Rep.
+   Prog. Phys. 76, 056503 (2013)):
+   `H_eff = -(hbar*vF)^N/gamma1^(N-1) * [[0, (kx-iky)^N], [(kx+iky)^N, 0]]`,
+   i.e. `H_AA = H_BB = 0` and `E(k) = +-(hbar*vF*k)^N/gamma1^(N-1)`, Berry
+   phase `N*pi`.  For the bare (non-moire, `g3 = 0`) trilayer
+   Hamiltonian near `k = 0`: fitting `E(k) ~ k^n` over
+   `|k| in [1e-5, 1e-3]` 1/Ang gives `n = 2.99997`; the coefficient
+   `E/k^3 -> 1263.021 eV*Ang^3` at small `k`, matching
+   `(hbar*vF)^3/gamma1^2 = 1263.021 eV*Ang^3` to 6 significant figures;
+   and the eigenvector's relative phase between the two outer
+   (non-dimer) sublattice components `A1`/`B3` advances by exactly `3*theta`
+   as `k` circles the origin, confirming winding number 3 (not merely an
+   isotropic `|k|^3` magnitude).
+
 ### Eigenvalues
 
 The eigenvalues of H (in eV) give the moire band energies at each k-point.
@@ -1070,7 +1137,8 @@ The zero-field solver is self-contained in `zerofield.py`, reusing only
 | `_build_coupling_matrices_K(V0, V1)` | hBN moire coupling T-matrices for K valley: T0 (uniform), T1/T2/T3 (modulated).  Phase convention uses `psi = -0.29`. |
 | `_build_coupling_matrices_Kp(V0, V1)` | Same for K' valley (conjugate phases, permuted sublattice factors). |
 | `_build_moire_hopping(Q_idx, NG, T0, T1, T2, T3, valley)` | Assemble the k-independent moire hopping matrix `H_hopp` (2*NG x 2*NG) using integer-index Kronecker deltas on Q-vector differences.  Valley-dependent sign convention on the q-vectors. |
-| `_solve_kpath_K(...)` | Build and diagonalize the full Hamiltonian at each k-point for K valley.  Handles both monolayer and bilayer. |
+| `_build_H_singlelayer(...)` / `_build_H_bilayer(...)` / `_build_H_trilayer(...)` | Assemble the full Hamiltonian at one k-point for `nlayers = 1/2/3` given a `dirac_term(j)` and `interlayer_term(j)` callback (valley sign conventions live in the caller). Shared by `_solve_kpath_K`/`_solve_kpath_Kp`. |
+| `_solve_kpath_K(...)` | Build and diagonalize the full Hamiltonian at each k-point for K valley.  Dispatches to the `_build_H_*` helper for `nlayers = 1`, `2`, or `3`. |
 | `_solve_kpath_Kp(...)` | Same for K' valley (sign flip on sigma_x in the Dirac term and interlayer coupling). |
 | `_make_kpath(q1, q2, dk, valley)` | Build high-symmetry k-path through the moire BZ.  K valley: K1->Gamma->K2->K1.  K' valley: K2->K1->Gamma->K2.  Returns k-points, linearized parameter, tick positions, and tick labels. |
 | `do_calc(filepath)` | Main entry point: read input, compute geometry, build coupling matrices, solve along k-path for each valley. |

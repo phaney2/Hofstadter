@@ -1,5 +1,6 @@
 """
-Zero-field moire band structure for mono- or bilayer graphene on hBN.
+Zero-field moire band structure for mono-, bi-, or ABC-stacked trilayer
+graphene on hBN.
 
 Uses a continuum model with plane-wave expansion in the moire reciprocal
 lattice.  No magnetic field; the basis states are (sublattice, Q-vector)
@@ -113,46 +114,91 @@ def _build_moire_hopping(Q_idx, NG, T0, T1, T2, T3, valley):
     return H
 
 
+def _build_H_singlelayer(Q, NG, dirac_term, U_layers, H_hopp):
+    H = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    for j in range(NG):
+        H[2*j:2*j+2, 2*j:2*j+2] = dirac_term(j) + U_layers[0] * np.eye(2)
+    H += H_hopp
+    return H
+
+
+def _build_H_bilayer(Q, NG, dirac_term, interlayer_term, U_layers, H_hopp,
+                      stacking_type):
+    U_top, U_bot = U_layers
+    H0_T = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    H0_B = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    UBLG = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    for j in range(NG):
+        H0_T[2*j:2*j+2, 2*j:2*j+2] = dirac_term(j) + U_top * np.eye(2)
+        H0_B[2*j:2*j+2, 2*j:2*j+2] = dirac_term(j) + U_bot * np.eye(2)
+        UBLG[2*j:2*j+2, 2*j:2*j+2] = interlayer_term(j)
+    if stacking_type == 1:
+        return np.block([[H0_T, UBLG],
+                          [UBLG.conj().T, H0_B + H_hopp]])
+    return np.block([[H0_T, UBLG.conj().T],
+                      [UBLG, H0_B + H_hopp]])
+
+
+def _build_H_trilayer(Q, NG, dirac_term, interlayer_term, U_layers, H_hopp,
+                       stacking_type):
+    """ABC (rhombohedral) stacking: layers 1-2 and 2-3 couple through the
+    same gamma1/v3 interlayer operator (identical bond geometry at every
+    step of the stack); layers 1-3 do not couple directly.  The hBN moire
+    potential acts on layer 3 (the layer nearest the substrate) only."""
+    U_top, U_mid, U_bot = U_layers
+    H0_T = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    H0_M = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    H0_B = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    UBLG_12 = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    UBLG_23 = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    Z = np.zeros((2 * NG, 2 * NG), dtype=complex)
+    for j in range(NG):
+        dirac = dirac_term(j)
+        interlayer = interlayer_term(j)
+        H0_T[2*j:2*j+2, 2*j:2*j+2] = dirac + U_top * np.eye(2)
+        H0_M[2*j:2*j+2, 2*j:2*j+2] = dirac + U_mid * np.eye(2)
+        H0_B[2*j:2*j+2, 2*j:2*j+2] = dirac + U_bot * np.eye(2)
+        UBLG_12[2*j:2*j+2, 2*j:2*j+2] = interlayer
+        UBLG_23[2*j:2*j+2, 2*j:2*j+2] = interlayer
+    if stacking_type == 1:
+        return np.block([[H0_T, UBLG_12, Z],
+                          [UBLG_12.conj().T, H0_M, UBLG_23],
+                          [Z, UBLG_23.conj().T, H0_B + H_hopp]])
+    return np.block([[H0_T, UBLG_12.conj().T, Z],
+                      [UBLG_12, H0_M, UBLG_23.conj().T],
+                      [Z, UBLG_23, H0_B + H_hopp]])
+
+
 def _solve_kpath_K(kpoints, Q, NG, hbar_vF, gamma1, hbar_v3,
-                   U_top, U_bot, H_hopp, nlayers, stacking_type=2):
+                   U_layers, H_hopp, nlayers, stacking_type=2):
     sigx = np.array([[0, 1], [1, 0]], dtype=complex)
     sigy = np.array([[0, -1j], [1j, 0]], dtype=complex)
     U1 = np.array([[0, 1], [0, 0]], dtype=complex)
     U2 = np.array([[0, 0], [1, 0]], dtype=complex)
 
-    dim = 2 * NG if nlayers == 1 else 4 * NG
+    dim = nlayers * 2 * NG
     NT = len(kpoints)
     bands = np.zeros((NT, dim))
 
     for i in range(NT):
         kx, ky = kpoints[i]
 
+        def dirac_term(j, kx=kx, ky=ky):
+            qx, qy = Q[j]
+            return -hbar_vF * ((kx - qx) * sigx + (ky - qy) * sigy)
+
+        def interlayer_term(j, kx=kx, ky=ky):
+            qx, qy = Q[j]
+            return gamma1 * U1 - hbar_v3 * ((kx - qx) - 1j * (ky - qy)) * U2
+
         if nlayers == 1:
-            H = np.zeros((2 * NG, 2 * NG), dtype=complex)
-            for j in range(NG):
-                qx, qy = Q[j]
-                H[2*j:2*j+2, 2*j:2*j+2] = (
-                    -hbar_vF * ((kx - qx) * sigx + (ky - qy) * sigy)
-                    + U_top * np.eye(2))
-            H += H_hopp
+            H = _build_H_singlelayer(Q, NG, dirac_term, U_layers, H_hopp)
+        elif nlayers == 2:
+            H = _build_H_bilayer(Q, NG, dirac_term, interlayer_term,
+                                  U_layers, H_hopp, stacking_type)
         else:
-            H0_T = np.zeros((2 * NG, 2 * NG), dtype=complex)
-            H0_B = np.zeros((2 * NG, 2 * NG), dtype=complex)
-            UBLG = np.zeros((2 * NG, 2 * NG), dtype=complex)
-            for j in range(NG):
-                qx, qy = Q[j]
-                dirac = -hbar_vF * ((kx - qx) * sigx + (ky - qy) * sigy)
-                H0_T[2*j:2*j+2, 2*j:2*j+2] = dirac + U_top * np.eye(2)
-                H0_B[2*j:2*j+2, 2*j:2*j+2] = dirac + U_bot * np.eye(2)
-                UBLG[2*j:2*j+2, 2*j:2*j+2] = (
-                    gamma1 * U1
-                    - hbar_v3 * ((kx - qx) - 1j * (ky - qy)) * U2)
-            if stacking_type == 1:
-                H = np.block([[H0_T, UBLG],
-                              [UBLG.conj().T, H0_B + H_hopp]])
-            else:
-                H = np.block([[H0_T, UBLG.conj().T],
-                              [UBLG, H0_B + H_hopp]])
+            H = _build_H_trilayer(Q, NG, dirac_term, interlayer_term,
+                                   U_layers, H_hopp, stacking_type)
 
         bands[i, :] = np.sort(linalg.eigvalsh(H))
 
@@ -160,45 +206,35 @@ def _solve_kpath_K(kpoints, Q, NG, hbar_vF, gamma1, hbar_v3,
 
 
 def _solve_kpath_Kp(kpoints, Q, NG, hbar_vF, gamma1, hbar_v3,
-                    U_top, U_bot, H_hopp, nlayers, stacking_type=2):
+                    U_layers, H_hopp, nlayers, stacking_type=2):
     sigx = np.array([[0, 1], [1, 0]], dtype=complex)
     sigy = np.array([[0, -1j], [1j, 0]], dtype=complex)
     U1 = np.array([[0, 1], [0, 0]], dtype=complex)
     U2 = np.array([[0, 0], [1, 0]], dtype=complex)
 
-    dim = 2 * NG if nlayers == 1 else 4 * NG
+    dim = nlayers * 2 * NG
     NT = len(kpoints)
     bands = np.zeros((NT, dim))
 
     for i in range(NT):
         kx, ky = kpoints[i]
 
+        def dirac_term(j, kx=kx, ky=ky):
+            qx, qy = Q[j]
+            return -hbar_vF * (-(kx - qx) * sigx + (ky - qy) * sigy)
+
+        def interlayer_term(j, kx=kx, ky=ky):
+            qx, qy = Q[j]
+            return gamma1 * U1 - hbar_v3 * (-(kx - qx) - 1j * (ky - qy)) * U2
+
         if nlayers == 1:
-            H = np.zeros((2 * NG, 2 * NG), dtype=complex)
-            for j in range(NG):
-                qx, qy = Q[j]
-                H[2*j:2*j+2, 2*j:2*j+2] = (
-                    -hbar_vF * (-(kx - qx) * sigx + (ky - qy) * sigy)
-                    + U_top * np.eye(2))
-            H += H_hopp
+            H = _build_H_singlelayer(Q, NG, dirac_term, U_layers, H_hopp)
+        elif nlayers == 2:
+            H = _build_H_bilayer(Q, NG, dirac_term, interlayer_term,
+                                  U_layers, H_hopp, stacking_type)
         else:
-            H0_T = np.zeros((2 * NG, 2 * NG), dtype=complex)
-            H0_B = np.zeros((2 * NG, 2 * NG), dtype=complex)
-            UBLG = np.zeros((2 * NG, 2 * NG), dtype=complex)
-            for j in range(NG):
-                qx, qy = Q[j]
-                dirac = -hbar_vF * (-(kx - qx) * sigx + (ky - qy) * sigy)
-                H0_T[2*j:2*j+2, 2*j:2*j+2] = dirac + U_top * np.eye(2)
-                H0_B[2*j:2*j+2, 2*j:2*j+2] = dirac + U_bot * np.eye(2)
-                UBLG[2*j:2*j+2, 2*j:2*j+2] = (
-                    gamma1 * U1
-                    - hbar_v3 * (-(kx - qx) - 1j * (ky - qy)) * U2)
-            if stacking_type == 1:
-                H = np.block([[H0_T, UBLG],
-                              [UBLG.conj().T, H0_B + H_hopp]])
-            else:
-                H = np.block([[H0_T, UBLG.conj().T],
-                              [UBLG, H0_B + H_hopp]])
+            H = _build_H_trilayer(Q, NG, dirac_term, interlayer_term,
+                                   U_layers, H_hopp, stacking_type)
 
         bands[i, :] = np.sort(linalg.eigvalsh(H))
 
@@ -272,17 +308,25 @@ def do_calc(filepath):
     V0 = v0_meV / 1000
     V1 = v1_meV / 1000
 
+    if nlayers not in (1, 2, 3):
+        raise ValueError(f"nlayers = {nlayers} not supported (must be 1, 2, or 3)")
+
     if nlayers == 1:
-        U_top = U[0] / 1000
-        U_bot = 0.0
-    else:
+        U_layers = (U[0] / 1000,)
+    elif nlayers == 2:
         U_top = U[0] / 1000
         U_bot = U[1] / 1000 if len(U) > 1 else U[0] / 1000
+        U_layers = (U_top, U_bot)
+    else:
+        U_top = U[0] / 1000
+        U_mid = U[1] / 1000 if len(U) > 1 else U[0] / 1000
+        U_bot = U[2] / 1000 if len(U) > 2 else U_mid
+        U_layers = (U_top, U_mid, U_bot)
 
     q1, q2, q3 = _compute_moire_vectors(theta, a, a_hBN)
     Q, Q_idx, NG = _build_qvectors(NQ, q1, q2)
 
-    dim = 2 * NG if nlayers == 1 else 4 * NG
+    dim = nlayers * 2 * NG
     print(f"  nlayers = {nlayers}")
     print(f"  NQ = {NQ}, NG = {NG}")
     print(f"  hbar*vF = {hbar_vF:.4f} eV*A")
@@ -309,11 +353,11 @@ def do_calc(filepath):
 
         if v == 'K':
             bands = _solve_kpath_K(kpoints, Q, NG, hbar_vF, gamma1,
-                                   hbar_v3, U_top, U_bot, H_hopp, nlayers,
+                                   hbar_v3, U_layers, H_hopp, nlayers,
                                    stacking_type)
         else:
             bands = _solve_kpath_Kp(kpoints, Q, NG, hbar_vF, gamma1,
-                                    hbar_v3, U_top, U_bot, H_hopp, nlayers,
+                                    hbar_v3, U_layers, H_hopp, nlayers,
                                     stacking_type)
 
         suffix = '_K' if v == 'K' else '_Kp'
