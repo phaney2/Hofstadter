@@ -259,10 +259,12 @@ def get_intralayerH_K(N, theta, B, qNslabels, params, delta_site):
         for rowc in range(len(A_LLcp1)):
             H_intra[A_LLcp1[rowc], B_LLc[rowc]] += -np.exp(1j * theta) * (c + 1) ** 0.5 * eneLL_0
 
-        if delta_site == 'A':
+        # 'AB' is the ABC-trilayer middle layer: both its sublattices are
+        # dimer sites (B2 with A1, A2 with B3), so delta shifts all of it.
+        if delta_site in ('A', 'AB'):
             for rowc in range(len(A_LLc)):
                 H_intra[A_LLc[rowc], A_LLc[rowc]] += delta / 2
-        elif delta_site == 'B':
+        if delta_site in ('B', 'AB'):
             for rowc in range(len(B_LLc)):
                 H_intra[B_LLc[rowc], B_LLc[rowc]] += delta / 2
 
@@ -293,10 +295,10 @@ def get_intralayerH_Kp(N, theta, B, qNslabels, params, delta_site):
         for rowc in range(len(A_LLcm1)):
             H_intra[A_LLcm1[rowc], B_LLc[rowc]] += np.exp(1j * theta) * c ** 0.5 * eneLL_0
 
-        if delta_site == 'A':
+        if delta_site in ('A', 'AB'):
             for rowc in range(len(A_LLc)):
                 H_intra[A_LLc[rowc], A_LLc[rowc]] += delta / 2
-        elif delta_site == 'B':
+        if delta_site in ('B', 'AB'):
             for rowc in range(len(B_LLc)):
                 H_intra[B_LLc[rowc], B_LLc[rowc]] += delta / 2
 

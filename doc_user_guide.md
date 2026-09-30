@@ -62,10 +62,10 @@ variables (e.g., `elist` can use `nebin`).
 | `pp` | int | `3` | Denominator of flux fraction qq/pp |
 | `qq` | int | `1` | Numerator of flux fraction qq/pp |
 | `g0` | float (meV) | `2796` | Graphene intralayer hopping |
-| `g1` | float (meV) | `340` | BLG interlayer coupling (gamma1). Not required for `nlayers=1`. |
-| `g3` | float (meV) | `0` | Trigonal warping (gamma3). Not required for `nlayers=1`. |
-| `g4` | float (meV) | `0` | Electron-hole asymmetry (gamma4). Not required for `nlayers=1`. |
-| `delta` | float (meV) | `0` | Sublattice mass (bilayer only; ignored for `nlayers=1`) |
+| `g1` | float (meV) | `340` | Interlayer coupling (gamma1). Required for `nlayers=2` and `nlayers=3`; unused for `nlayers=1`. |
+| `g3` | float (meV) | `0` | Trigonal warping (gamma3). Required for `nlayers=2` and `nlayers=3`; unused for `nlayers=1`. |
+| `g4` | float (meV) | `0` | Electron-hole asymmetry (gamma4). Required for `nlayers=2` and `nlayers=3`; unused for `nlayers=1`. |
+| `delta` | float (meV) | `0` | Dimer-site on-site energy. Ignored for `nlayers=1`. For `nlayers=3` it sits on A1, on both sublattices of layer 2, and on B3 -- see the trilayer section below. |
 | `v0` | float (meV) | `30` | hBN uniform moire potential |
 | `v1` | float (meV) | `21` | hBN modulated moire potential |
 | `w` | float (meV) | `110` | Interlayer coupling scale (used for LL cutoff estimate) |
@@ -74,18 +74,18 @@ variables (e.g., `elist` can use `nebin`).
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `nlayers` | int | `2` | Number of graphene layers: 1 = monolayer, 2 = bilayer |
+| `nlayers` | int | `2` | Number of graphene layers: 1 = monolayer, 2 = Bernal bilayer, 3 = ABC-stacked trilayer. Anything else raises. |
 | `theta` | float (deg) | `0.0` | Twist angle between graphene and hBN |
 | `eta` | float | `2` | AA/AB ratio (legacy) |
-| `U` | array (meV) | `0*[1 1]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer |
+| `U` | array (meV) | zeros | Layer on-site energies: `[top]`, `[top, bottom]`, or `[top, mid, bottom]`. A displacement field is applied as `U = [D/2, 0, -D/2]`. A short array is padded with **zeros** (not by repeating the last element, unlike `zerofield.py`). |
 | `nk1` | int | `10` | k-mesh points along b1/pp |
 | `nk2` | int | `10` | k-mesh points along the second zone vector (`gcd(2*pp,qq)*b2/pp` by default) |
 | `full_zone` | int | `0` | 1 = sample the full qq-extended zone `[b1/pp, qq*b2/pp]` instead of the minimal zone. Identical k-averages at higher cost; for regression tests. |
 | `LL_multiplier` | int | `6` | Controls Landau level cutoff N |
 | `Nmax` | int | `1000` | Hard cap on number of Landau levels |
 | `isparallel` | int | `1` | 0 = serial, 1 = parallel k-loop |
-| `layer_resolved` | int | `0` | 1 = compute per-eigenstate layer weights (bilayer only; uses `eigh` instead of `eigvalsh`) |
-| `stacking_type` | int | `2` | Bilayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). See Moon & Koshino, PRB 90, 155406 (2014), Eqs. 25 and B1. Ignored for monolayer. |
+| `layer_resolved` | int | `0` | 1 = compute per-eigenstate layer weights (uses `eigh` instead of `eigvalsh`). Ignored for `nlayers=1`. Output shape changed -- see the note under `'ek'` output. |
+| `stacking_type` | int | `2` | Interlayer bond arrangement: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). See Moon & Koshino, PRB 90, 155406 (2014), Eqs. 25 and B1. Applied identically to both bonds when `nlayers=3`. Ignored for monolayer. |
 | `moire_psi` | float (rad) | `0.29` | Moire coupling phase psi. |
 
 #### Output control
@@ -229,14 +229,22 @@ Access in MATLAB: `d = load('file.mat'); d.results.bands_K`,
 
 where `Nk = nk1 * nk2` and `Nbands = nlayers * qq * (2*N + 1)`.
 
-With `layer_resolved = 1` (bilayer only), the output additionally includes:
+With `layer_resolved = 1`, the output additionally includes:
 
 | Key | Shape | Units | Description |
 |---|---|---|---|
-| `weights_K` | (Nk, Nbands) | -- | Top-layer weight per eigenstate, K valley |
-| `weights_Kp` | (Nk, Nbands) | -- | Top-layer weight per eigenstate, K' valley |
+| `weights_K` | (Nk, Nbands, nlayers) | -- | Per-eigenstate layer weights, K valley |
+| `weights_Kp` | (Nk, Nbands, nlayers) | -- | Per-eigenstate layer weights, K' valley |
 
-Bottom-layer weight is `1 - weights_K`.
+Layer order is outermost first: index 0 is the top layer, index
+`nlayers-1` the bottom layer facing the hBN.  The weights sum to 1 over
+the layer axis, exactly.
+
+> **Output shape change.**  `weights_K` used to be 2D and hold the
+> top-layer weight alone, with the bottom layer inferred as
+> `1 - weights_K`.  That has no three-layer analogue, so it is now 3D
+> for every `nlayers`, matching the zero-field engine.  Existing bilayer
+> scripts reading `weights_K[k, n]` must read `weights_K[k, n, 0]`.
 
 #### `calctype = 'dos'`
 
@@ -246,16 +254,18 @@ Bottom-layer weight is `1 - weights_K`.
 | `dos_K` | (nebin,) | states/cell | States per primitive moire cell per bin, K valley |
 | `dos_Kp` | (nebin,) | states/cell | States per primitive moire cell per bin, K' valley |
 
-With `layer_resolved = 1` (bilayer only), the output additionally includes:
+With `layer_resolved = 1`, the output additionally includes one array
+per layer, named for its position:
 
 | Key | Shape | Units | Description |
 |---|---|---|---|
-| `dos_K_top` | (nebin,) | counts | Top-layer-weighted DOS, K valley |
-| `dos_K_bottom` | (nebin,) | counts | Bottom-layer-weighted DOS, K valley |
-| `dos_Kp_top` | (nebin,) | counts | Top-layer-weighted DOS, K' valley |
-| `dos_Kp_bottom` | (nebin,) | counts | Bottom-layer-weighted DOS, K' valley |
+| `dos_K_top` | (nebin,) | states/cell | Top-layer-weighted DOS, K valley |
+| `dos_K_mid` | (nebin,) | states/cell | Middle-layer-weighted DOS, K valley (`nlayers = 3` only) |
+| `dos_K_bottom` | (nebin,) | states/cell | Bottom-layer-weighted DOS, K valley |
 
-`dos_K_top + dos_K_bottom = dos_K` (exact to machine precision).
+and the same four/six keys for `Kp`.  `sum_L dos_K_L == dos_K` exactly:
+every layer is accumulated from the eigenvector slice norms, rather than
+one being inferred from the others.
 
 **DOS normalization**: The DOS arrays are physically normalized: each
 eigenvalue contributes `1/(Nk_tot * 2*pp)` to its bin — one state per
@@ -406,8 +416,8 @@ layer furthest from the hBN and `L = nlayers-1` the layer adjacent to
 it.  The layer axis sums to 1 for every eigenstate.  Use it to colour a
 band structure by layer character.
 
-Note this differs from the Hofstadter engine, where `weights_K` is 2D and
-holds the top-layer weight alone.
+The Hofstadter engine now uses this same convention, so `weights_K` has
+the same meaning and shape in both.
 
 #### `calctype = 'dos'`
 
@@ -551,6 +561,38 @@ Nmax = 1000;
 calctype = 'ek';
 valley = {'K', 'Kp'};
 ```
+
+### ABC trilayer at flux 1/3 with a displacement field
+
+```
+nlayers = 3;
+isparallel = 1;
+theta = 0.0;
+qq = 1;
+pp = 3;
+g0 = 2796;
+g1 = 340;
+g3 = 0;
+g4 = 0;
+delta = 0;
+U = [30 0 -30];
+v0 = 21;
+v1 = 29;
+w = 110;
+eta = 2;
+nk1 = 10;
+nk2 = 10;
+LL_multiplier = 6;
+Nmax = 1000;
+calctype = 'ek';
+layer_resolved = 1;
+valley = {'K', 'Kp'};
+```
+
+`U = [D/2, 0, -D/2]` applies a displacement field `D = 60` meV.  Layer 1
+is furthest from the hBN and the moire potential acts on layer 3, so the
+sign of `D` is physically meaningful.  `weights_K[:, :, 0]` is the
+top-layer weight, `[:, :, 2]` the bottom.
 
 ### DOS at flux 1/5
 

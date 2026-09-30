@@ -17,6 +17,10 @@ trilayer graphene on hBN.  Four calculation modes:
    Supports constant broadening or SCBA (self-consistent Born
    approximation) for energy-dependent broadening that captures
    localization-induced σ_xx suppression in narrow subbands.
+   Supports `nlayers` = 1, 2, or 3; `nlayers = 3` is ABC (rhombohedral)
+   stacking, the same model as the zero-field engine (same `Hinter` on
+   both bonds, no gamma2).  `layer_resolved = 1` gives `weights_K` shape
+   `(Nk, dim, nlayers)` and one `dos_K_<layer>` array per layer.
    Legacy driver `main_v2.py` is kept for reference.
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
    expansion.  Supports `calctype = 'ek'` (bands along a k-path through
@@ -24,9 +28,8 @@ trilayer graphene on hBN.  Four calculation modes:
    on an `nk1 x nk2` mesh tiling one moire BZ).  There is no zero-field
    `'transport'` mode.  `layer_resolved = 1` adds per-eigenstate layer
    weights in either mode — `weights_K` shape `(NT, dim, nlayers)` for
-   `'ek'`, and `dos_K_top`/`_mid`/`_bottom` for `'dos'`.  Note this is
-   *not* the same shape as the Hofstadter engine's bilayer-only
-   `weights_K`, which is 2D and holds the top-layer weight alone.
+   `'ek'`, and `dos_K_top`/`_mid`/`_bottom` for `'dos'`.  The Hofstadter
+   engine now uses the same convention.
    Supports `nlayers = 3`
    with ABC (rhombohedral) stacking: layers 1-2 and 2-3 each couple through
    the same gamma1/v3 interlayer operator (identical bond geometry at every
@@ -36,8 +39,10 @@ trilayer graphene on hBN.  Four calculation modes:
    is applied (`U = [D/2, 0, -D/2]`); there is no separate D parameter.
    Layer 1 is the layer furthest from the hBN; the moire potential acts
    on layer 3 only, so the sign of D is physically meaningful.  Trilayer
-   is only implemented for the zero-field engine, not Hofstadter or
-   semiclassical.
+   is implemented for the zero-field and Hofstadter engines, **not** the
+   semiclassical one.  Note `zerofield.py` pads a short `U` by repeating
+   its last element while `main_v3.py` pads with zeros; both are
+   deliberate and load-bearing for existing inputs.
 3. **Semiclassical** (`semiclassical/`): Full BZ k-mesh band structure
    plus Berry curvature, orbital moment, Fukuyama susceptibility, and
    Onsager semiclassical quantization (Landau level fan diagrams).
@@ -152,9 +157,19 @@ than re-parsing the source.
   Type 2 (A1-B2) puts `Hinter` in the upper-right; Type 1 (B1-A2) swaps
   the off-diagonal blocks.  See Moon & Koshino, PRB 90, 155406 (2014),
   Eqs. 25 and B1.  This applies to `main_v3.py`, `zerofield.py`, and the
-  semiclassical code (`bandstructure.py`, `hofstadter_system.py`).  For
-  `zerofield.py` with `nlayers = 3`, the same `stacking_type` choice is
-  applied to both interlayer bonds (1-2 and 2-3) identically.
+  semiclassical code (`bandstructure.py`, `hofstadter_system.py`).  With
+  `nlayers = 3` the same `stacking_type` choice is applied to both
+  interlayer bonds (1-2 and 2-3) identically, in `zerofield.py` and
+  `main_v3.py` alike.
+- **ABC trilayer dimer sites**: in `main_v3.py`, stacking type 2
+  dimerizes A1-B2, so repeating the bond gives A2-B3 and the middle
+  layer is dimerized on *both* sublattices; the low-energy sites are B1
+  and A3.  `delta` (the dimer on-site energy) is therefore passed as
+  `delta_site` `'A'`, `'AB'`, `'B'` for layers 1, 2, 3 — the `'AB'`
+  branch in `get_intralayerH_K/Kp` exists only for this.  The two
+  engines label the dimers differently (zerofield's non-dimer sites are
+  A1/B3, main_v3's are B1/A3) because their `stacking_type = 2` blocks
+  are transposes of each other; each is internally consistent.
 - **Minimal magnetic k-zone**: `main_v3.py` and the semiclassical
   Hofstadter mode both sample `[b1/pp, qfac*b2/pp]` with
   `qfac = gcd(2*pp, qq)` — the smallest zone on which all
@@ -291,6 +306,30 @@ finite-Γ outputs against `git show HEAD:main_v3.py` and requires
 `max|diff| == 0`, so it doubles as a regression guard for any change to
 the transport k-loop.
 
+For the ABC trilayer, run `python test_trilayer_hofstadter.py`
+(untracked).  No external benchmark exists for this mode, so every check
+is either a regression against the MATLAB-benchmarked mono/bilayer paths
+or a parameter-free property of ABC stacking: bilayer and monolayer
+bands bit-identical to HEAD; the decoupled limit `g1=g3=g4=0` giving
+exactly `nlayers` copies of the monolayer spectrum; chiral symmetry
+`E_n = -E_{dim+1-n}`; `nlayers` zero-energy LLs (the chiral index);
+the chiral LL ladder `E_n = omega^N/gamma1^(N-1) sqrt(n(n-1)...(n-N+1))`
+in both coefficient and spacing; layer weights partitioning unity;
+`U` as uniform shift vs displacement field; and the per-valley σ_xy
+parity below.  All must PASS.
+
+Two traps that cost real time when writing these checks:
+
+- The chiral ladder only holds for `hbar*omega << gamma1`.  At the
+  physical `gamma1 = 340` meV and `qq/pp = 1`, `hbar*omega/gamma1` is
+  **0.4** — nowhere near the limit, and a `B^(N/2)` scaling test there
+  fails for bilayer *and* trilayer while passing for monolayer (which
+  has no `gamma1`).  Test it at a large `gamma1` instead.
+- Thresholds for "which level is the first nonzero one" must be referred
+  to the chiral scale, not to `max|E|`.  At `gamma1 = 20000` the first
+  trilayer level is `1e-6` of the bandwidth, so an `eps*max|E|` cut
+  silently slices it off and the test reads split zero modes instead.
+
 ### Zero-field
 
 1. Run `python validate_zerofield.py` — compares against
@@ -319,6 +358,15 @@ matrices).  main_v3 uses Nq=qq (same chain size as main_v2) with
 corrected T-matrix conventions; it samples the minimal k-zone
 `[b1/pp, gcd(2*pp,qq)*b2/pp]` by default (`full_zone = 1` restores the
 qq-extended zone).
+
+Chern quantization needs the converged LL basis: at `LL_multiplier = 2`
+/ `Nmax = 60` **nothing** quantizes, for any `nlayers`, and the gap σ_xy
+values are stable but non-integer under k-mesh refinement — which looks
+like a kernel bug and is not one.  Use the defaults
+(`LL_multiplier = 6`, `Nmax = 1000`).  Then per-valley σ_xy in a gap is
+an integer for even chiral index and a **half-integer** for odd: mono-
+and trilayer give half-integers, bilayer integers, and K + K' sums to an
+integer in every case.  Do not "fix" a half-integer trilayer plateau.
 
 ### Zero-field
 The default `input_zerofield.txt` uses `NQ=7` (49 Q-vectors, dim=196 for

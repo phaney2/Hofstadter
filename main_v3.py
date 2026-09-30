@@ -32,6 +32,53 @@ HBAR_EV = 6.582119569e-16  # eV*s
 # spectral gap, far above the roundoff scale of the velocity matrices.
 _DEGEN_TOL_EV = 1e-9
 
+# Which sublattice carries the dimer on-site energy `delta`, per layer.
+# Stacking type 2 dimerizes A1-B2, so in ABC trilayer the same bond
+# repeats as A2-B3 and the middle layer is dimerized on both sublattices.
+# The low-energy (non-dimer) sites are B1 and A{nlayers}.
+_DELTA_SITES = {1: ('A',), 2: ('A', 'B'), 3: ('A', 'AB', 'B')}
+
+# Layer names for the layer-resolved outputs, outermost layer first.
+# The moire potential acts on the last layer, the one facing the hBN.
+_LAYER_NAMES = {1: ('top',), 2: ('top', 'bottom'),
+                3: ('top', 'mid', 'bottom')}
+
+
+def _layer_weights(evecs, dl, nlayers):
+    """Per-eigenstate probability on each layer.  Returns (dim, nlayers);
+    rows sum to 1.  Layer blocks are contiguous and disjoint, so these are
+    exact slice norms."""
+    wt = np.empty((evecs.shape[1], nlayers))
+    for L in range(nlayers):
+        wt[:, L] = np.sum(np.abs(evecs[L * dl:(L + 1) * dl, :])**2, axis=0)
+    return wt
+
+
+def _stack_layers(Hintra_list, Hinter, U, nlayers, stacking_type):
+    """Assemble the layer block matrix for nlayers >= 2.
+
+    ABC (rhombohedral) stacking: the same `Hinter` couples every
+    consecutive pair, because the bond geometry is identical at each step
+    of the chain.  There is no direct coupling between non-adjacent
+    layers (no gamma2), so the block matrix is block-tridiagonal.
+    """
+    dl = Hintra_list[0].shape[0]
+    H = np.zeros((nlayers * dl, nlayers * dl), dtype=complex)
+
+    for L in range(nlayers):
+        s = slice(L * dl, (L + 1) * dl)
+        H[s, s] = Hintra_list[L] + np.eye(dl) * (U[L] / 1e3 * Q_E)
+
+    # Type 2 puts Hinter in the upper-right of each bond, type 1 swaps it.
+    upper = Hinter if stacking_type == 2 else Hinter.T.conj()
+    for L in range(nlayers - 1):
+        r = slice(L * dl, (L + 1) * dl)
+        c = slice((L + 1) * dl, (L + 2) * dl)
+        H[r, c] = upper
+        H[c, r] = upper.T.conj()
+
+    return H
+
 
 # ---------------------------------------------------------------------------
 # Per-k-point solver (serial core + parallel wrapper)
@@ -41,8 +88,8 @@ def _solve_kpoint_core(d, kpt):
     """Solve both valleys at a single k-point.
 
     Returns (tek_K, tek_Kp, wt_K, wt_Kp).
-    wt_K/wt_Kp are top-layer weights per eigenstate when layer_resolved=1,
-    otherwise None.
+    wt_K/wt_Kp are per-eigenstate layer weights, shape (dim, nlayers),
+    when layer_resolved=1, otherwise None.
     """
     kpts = kpt - d['M_mag']
     kx_val, ky_val = kpts
@@ -52,6 +99,7 @@ def _solve_kpoint_core(d, kpt):
     mo = d['moire_offset']
     layer_resolved = d.get('layer_resolved', 0)
     dl = d.get('dim_MLG', 0)
+    nlayers = d.get('nlayers', 1)
 
     tek_K = None
     tek_Kp = None
@@ -70,7 +118,7 @@ def _solve_kpoint_core(d, kpt):
 
         if layer_resolved:
             tek_K, evecs = linalg.eigh(Htotal_K, overwrite_a=True, check_finite=False)
-            wt_K = np.sum(np.abs(evecs[:dl, :])**2, axis=0)
+            wt_K = _layer_weights(evecs, dl, nlayers)
         else:
             tek_K = np.sort(linalg.eigvalsh(Htotal_K, overwrite_a=True, check_finite=False))
 
@@ -86,7 +134,7 @@ def _solve_kpoint_core(d, kpt):
 
         if layer_resolved:
             tek_Kp, evecs = linalg.eigh(Htotal_Kp, overwrite_a=True, check_finite=False)
-            wt_Kp = np.sum(np.abs(evecs[:dl, :])**2, axis=0)
+            wt_Kp = _layer_weights(evecs, dl, nlayers)
         else:
             tek_Kp = np.sort(linalg.eigvalsh(Htotal_Kp, overwrite_a=True, check_finite=False))
 
@@ -571,7 +619,9 @@ def do_calc(filepath):
     pp = int(d['pp'])
     g0 = d['g0']
     nlayers = int(d.get('nlayers', 2))
-    if nlayers == 2:
+    if nlayers not in (1, 2, 3):
+        raise ValueError(f"nlayers = {nlayers} not supported (must be 1, 2, or 3)")
+    if nlayers >= 2:
         g1 = d['g1']
         g3 = d['g3']
         g4 = d['g4']
@@ -584,9 +634,12 @@ def do_calc(filepath):
     v1_meV = d['v1']
     w_meV = d['w']
     eta = d.get('eta', eta)
-    U = np.atleast_1d(d.get('U', np.array([0, 0])))
-    if len(U) == 1:
-        U = np.array([U[0], 0])
+    # Short U is padded with zeros, not by repeating the last element --
+    # this differs from zerofield.py, and is kept for compatibility with
+    # existing bilayer inputs that pass a scalar U.
+    U = np.atleast_1d(d.get('U', np.zeros(nlayers)))
+    if len(U) < nlayers:
+        U = np.append(U, np.zeros(nlayers - len(U)))
     nk1 = int(d.get('nk1', 25))
     nk2 = int(d.get('nk2', 40))
     LL_multiplier = d.get('LL_multiplier', 6)
@@ -663,22 +716,11 @@ def do_calc(filepath):
             U_onsite_val = U[0] / 1e3 * Q_E
             H_base_K = Hintra_K + np.eye(dl) * U_onsite_val
         else:
-            Utp_val = U[0] / 1e3 * Q_E
-            Ubm_val = U[1] / 1e3 * Q_E
             Hinter_K = get_intermonolayerH_K(N, 0, B, qNslabels_K, TBGparams)
-            Hintra2_K = get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, 'B')
-            Utp = np.eye(dl) * Utp_val
-            Ubm = np.eye(dl) * Ubm_val
-            if stacking_type == 1:
-                H_base_K = np.block([
-                    [Hintra_K + Utp, Hinter_K.T.conj()],
-                    [Hinter_K, Hintra2_K + Ubm]
-                ])
-            else:
-                H_base_K = np.block([
-                    [Hintra_K + Utp, Hinter_K],
-                    [Hinter_K.T.conj(), Hintra2_K + Ubm]
-                ])
+            H_base_K = _stack_layers(
+                [get_intralayerH_K(N, 0, B, qNslabels_K, TBGparams, s)
+                 for s in _DELTA_SITES[nlayers]],
+                Hinter_K, U, nlayers, stacking_type)
 
     # --- K' valley: k-independent Hamiltonian ---
     if 'Kp' in valley:
@@ -692,22 +734,11 @@ def do_calc(filepath):
             U_onsite_val = U[0] / 1e3 * Q_E
             H_base_Kp = Hintra_Kp + np.eye(dl) * U_onsite_val
         else:
-            Utp_val = U[0] / 1e3 * Q_E
-            Ubm_val = U[1] / 1e3 * Q_E
             Hinter_Kp = get_intermonolayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams)
-            Hintra2_Kp = get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, 'B')
-            Utp = np.eye(dl) * Utp_val
-            Ubm = np.eye(dl) * Ubm_val
-            if stacking_type == 1:
-                H_base_Kp = np.block([
-                    [Hintra_Kp + Utp, Hinter_Kp.T.conj()],
-                    [Hinter_Kp, Hintra2_Kp + Ubm]
-                ])
-            else:
-                H_base_Kp = np.block([
-                    [Hintra_Kp + Utp, Hinter_Kp],
-                    [Hinter_Kp.T.conj(), Hintra2_Kp + Ubm]
-                ])
+            H_base_Kp = _stack_layers(
+                [get_intralayerH_Kp(N, 0, B, qNslabels_Kp, TBGparams, s)
+                 for s in _DELTA_SITES[nlayers]],
+                Hinter_Kp, U, nlayers, stacking_type)
 
     # --- k-mesh ---
     b1 = ktheta * np.array([0, -1])
@@ -739,14 +770,16 @@ def do_calc(filepath):
         kpoints[j, :] = vb.T @ frac
 
     dim_MLG = Hintra_K.shape[0] if 'K' in valley else Hintra_Kp.shape[0]
-    dim_total = dim_MLG if nlayers == 1 else 2 * dim_MLG
+    dim_total = nlayers * dim_MLG
     print(f"  dim per layer (post-chop) = {dim_MLG}")
     print(f"  dim total = {dim_total}")
 
     # --- pre-scale and pack shared data for the k-point solver ---
     scale = 1000 / Q_E
     v0_eye_scaled = scale * v0 * np.eye(dim_MLG)
-    moire_offset = 0 if nlayers == 1 else dim_MLG
+    # The moire potential acts on the last layer, the one facing the hBN,
+    # which is the trailing diagonal block.
+    moire_offset = (nlayers - 1) * dim_MLG
 
     # =======================================================================
     # Transport calculation (completely separate k-loop)
@@ -879,29 +912,21 @@ def do_calc(filepath):
         # Work in eV / Angstrom / eV*s  →  velocity in Ang/s
         if 'K' in valley:
             Ax_K, Ay_K = get_berry_connection_K(N, B, qNslabels_K)
-            if nlayers == 1:
-                Ax_full_K = Ax_K * m_to_Ang
-                Ay_full_K = Ay_K * m_to_Ang
-                H_eV_K = H_base_K * J_to_eV
-            else:
-                zz = np.zeros_like(Ax_K)
-                Ax_full_K = np.block([[Ax_K, zz], [zz, Ax_K]]) * m_to_Ang
-                Ay_full_K = np.block([[Ay_K, zz], [zz, Ay_K]]) * m_to_Ang
-                H_eV_K = H_base_K * J_to_eV
+            # The connection is intralayer, so it repeats block-diagonally
+            # once per layer.
+            eyeL = np.eye(nlayers)
+            Ax_full_K = np.kron(eyeL, Ax_K) * m_to_Ang
+            Ay_full_K = np.kron(eyeL, Ay_K) * m_to_Ang
+            H_eV_K = H_base_K * J_to_eV
             Vx_K = (1j / HBAR_EV) * (Ax_full_K @ H_eV_K - H_eV_K @ Ax_full_K)
             Vy_K = (1j / HBAR_EV) * (Ay_full_K @ H_eV_K - H_eV_K @ Ay_full_K)
 
         if 'Kp' in valley:
             Ax_Kp, Ay_Kp = get_berry_connection_Kp(N, B, qNslabels_Kp)
-            if nlayers == 1:
-                Ax_full_Kp = Ax_Kp * m_to_Ang
-                Ay_full_Kp = Ay_Kp * m_to_Ang
-                H_eV_Kp = H_base_Kp * J_to_eV
-            else:
-                zz = np.zeros_like(Ax_Kp)
-                Ax_full_Kp = np.block([[Ax_Kp, zz], [zz, Ax_Kp]]) * m_to_Ang
-                Ay_full_Kp = np.block([[Ay_Kp, zz], [zz, Ay_Kp]]) * m_to_Ang
-                H_eV_Kp = H_base_Kp * J_to_eV
+            eyeL = np.eye(nlayers)
+            Ax_full_Kp = np.kron(eyeL, Ax_Kp) * m_to_Ang
+            Ay_full_Kp = np.kron(eyeL, Ay_Kp) * m_to_Ang
+            H_eV_Kp = H_base_Kp * J_to_eV
             Vx_Kp = (1j / HBAR_EV) * (Ax_full_Kp @ H_eV_Kp - H_eV_Kp @ Ax_full_Kp)
             Vy_Kp = (1j / HBAR_EV) * (Ay_full_Kp @ H_eV_Kp - H_eV_Kp @ Ay_full_Kp)
 
@@ -1267,8 +1292,8 @@ def do_calc(filepath):
     bands_K = np.zeros((Nk_tot, dim_total))
     bands_Kp = np.zeros((Nk_tot, dim_total))
     if layer_resolved:
-        weights_K = np.zeros((Nk_tot, dim_total))
-        weights_Kp = np.zeros((Nk_tot, dim_total))
+        weights_K = np.zeros((Nk_tot, dim_total, nlayers))
+        weights_Kp = np.zeros((Nk_tot, dim_total, nlayers))
 
     shared = {
         'pp': pp, 'qq': qq, 'Lx': Lx, 'Ly': Ly,
@@ -1278,6 +1303,7 @@ def do_calc(filepath):
         'v0_eye': v0_eye_scaled,
         'layer_resolved': layer_resolved,
         'dim_MLG': dim_MLG,
+        'nlayers': nlayers,
     }
     if 'K' in valley:
         shared.update({
@@ -1345,10 +1371,11 @@ def do_calc(filepath):
     dos_K = np.zeros(len(elist))
     dos_Kp = np.zeros(len(elist))
     if layer_resolved:
-        dos_K_top = np.zeros(len(elist))
-        dos_K_bottom = np.zeros(len(elist))
-        dos_Kp_top = np.zeros(len(elist))
-        dos_Kp_bottom = np.zeros(len(elist))
+        # One column per layer; each is accumulated from the exact slice
+        # norms, so sum_L dos_L == dos rather than the bottom layer being
+        # inferred as 1 - top.
+        dos_K_layers = np.zeros((len(elist), nlayers))
+        dos_Kp_layers = np.zeros((len(elist), nlayers))
 
     for kc in range(Nk_tot):
         if 'K' in valley:
@@ -1359,10 +1386,9 @@ def do_calc(filepath):
             for b in bins:
                 dos_K[b] += dos_weight
             if layer_resolved:
-                wt = weights_K[kc, mask]
+                wt = weights_K[kc, mask, :]
                 for j, b in enumerate(bins):
-                    dos_K_top[b] += wt[j] * dos_weight
-                    dos_K_bottom[b] += (1 - wt[j]) * dos_weight
+                    dos_K_layers[b, :] += wt[j, :] * dos_weight
         if 'Kp' in valley:
             tek = bands_Kp[kc, :]
             mask = (tek > elist[0]) & (tek < elist[-1])
@@ -1371,19 +1397,17 @@ def do_calc(filepath):
             for b in bins:
                 dos_Kp[b] += dos_weight
             if layer_resolved:
-                wt = weights_Kp[kc, mask]
+                wt = weights_Kp[kc, mask, :]
                 for j, b in enumerate(bins):
-                    dos_Kp_top[b] += wt[j] * dos_weight
-                    dos_Kp_bottom[b] += (1 - wt[j]) * dos_weight
+                    dos_Kp_layers[b, :] += wt[j, :] * dos_weight
 
     result = {'calctype': 'dos', 'params': inp,
               'elist': elist,
               'dos_K': dos_K, 'dos_Kp': dos_Kp}
     if layer_resolved:
-        result['dos_K_top'] = dos_K_top
-        result['dos_K_bottom'] = dos_K_bottom
-        result['dos_Kp_top'] = dos_Kp_top
-        result['dos_Kp_bottom'] = dos_Kp_bottom
+        for L, name in enumerate(_LAYER_NAMES[nlayers]):
+            result[f'dos_K_{name}'] = dos_K_layers[:, L]
+            result[f'dos_Kp_{name}'] = dos_Kp_layers[:, L]
     return result
 
 

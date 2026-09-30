@@ -19,8 +19,8 @@ Quantum Matter."
 
 ## 1. Physical setup
 
-The system is a graphene sheet (monolayer or Bernal-stacked bilayer) on an
-hBN substrate.  The lattice mismatch between graphene (a = 2.46 A) and hBN
+The system is a graphene sheet (monolayer, Bernal-stacked bilayer, or
+ABC-stacked trilayer) on an hBN substrate.  The lattice mismatch between graphene (a = 2.46 A) and hBN
 (a = 2.504 A) produces a moire superlattice with period `L_moire` and
 primitive (triangular-lattice) unit cell area `A_uc = sqrt(3)/2 * L_moire^2`.
 A perpendicular magnetic field B is applied such that the flux through one
@@ -36,7 +36,8 @@ output normalizations reference the primitive cell `A_uc` and the flux
 `qq/(2*pp)`.
 
 The number of graphene layers is controlled by the input parameter `nlayers`
-(default 2).
+(default 2).  `nlayers = 3` is ABC (rhombohedral) stacking; anything
+outside `{1, 2, 3}` raises.
 
 The Hamiltonian is expressed in a Landau-level (LL) basis.  Each basis state
 is labeled by:
@@ -79,6 +80,55 @@ V_hBN = [ 0           0          ]
 
 where `V_hBN_tot` is the moire potential from the hBN substrate acting on
 the bottom layer only.
+
+### ABC-stacked trilayer (`nlayers = 3`)
+
+Layers are indexed 1 (top) - 2 (middle) - 3 (bottom, adjacent to hBN).
+ABC (rhombohedral) stacking means the interlayer bond geometry is
+identical at every step of the chain, so the *same* `Hinter` operator
+(the `gamma1`/`gamma3`/`gamma4` inter-monolayer Hamiltonian, reused
+unchanged) couples layers 1-2 and 2-3.  There is no direct layer-1-3
+coupling (no `gamma2`), so the layer block matrix is block-tridiagonal.
+This is a minimal nearest-layer-only extension of the bilayer model, not
+a full tight-binding-parameter trilayer model.
+
+**Type 2 (default):**
+```
+H_ABC = [ Hintra1 + U1   Hinter        0                       ]
+        [ Hinter^dag     Hintra2 + U2  Hinter                  ]
+        [ 0              Hinter^dag    Hintra3 + U3 + V_hBN_tot ]
+```
+
+**Type 1** swaps `Hinter` and `Hinter^dag` on both bonds, identically.
+
+The moire potential acts on layer 3 only, the layer facing the hBN,
+which is the trailing diagonal block.  This is why `moire_offset` is
+`(nlayers-1)*dim_MLG` and the k-dependent update stays a single
+`H[mo:, mo:] +=` slice for every `nlayers`.
+
+`U` is a 3-element array `[U_top, U_mid, U_bot]` (meV); a displacement
+field is applied as `U = [D/2, 0, -D/2]`.  A shorter array is padded
+with **zeros** — note this differs from `zerofield.py`, which pads by
+repeating the last element.  The Hofstadter behaviour is the older one
+and is kept so that existing bilayer inputs passing a scalar `U` are
+unaffected.
+
+#### Dimer sites and `delta`
+
+Stacking type 2 dimerizes A1-B2, so repeating the same bond gives
+A2-B3.  The middle layer is therefore dimerized on *both* sublattices,
+and the low-energy (non-dimer) sites are B1 and A3.  `delta` is the
+dimer on-site energy, so the per-layer `delta_site` arguments are:
+
+| `nlayers` | layer 1 | layer 2 | layer 3 |
+|---|---|---|---|
+| 1 | — (delta forced to 0) | | |
+| 2 | `'A'` | `'B'` | |
+| 3 | `'A'` | `'AB'` | `'B'` |
+
+`'AB'` puts `delta` on both sublattices of the middle layer, which for
+ABC trilayer is a uniform shift of that layer — correct, and physically
+distinct from `U_mid` only in sign convention.
 
 ### Monolayer (`nlayers = 1`)
 
@@ -150,13 +200,15 @@ Code is split across six modules:
 | `get_interbilayerterms_Kp_testing(...)` | Same for K' valley. |
 | `get_intermonolayerH_K(N, theta, B, labels, params)` | Inter-monolayer coupling (gamma1 constant, gamma3 raising, gamma4 lowering operators). K valley. |
 | `get_intermonolayerH_Kp(N, theta, B, labels, params)` | Same for K' valley (operator directions reversed). |
-| `get_intralayerH_K(N, theta, B, labels, params, delta_site)` | Intralayer kinetic Hamiltonian for K valley.  Builds upper-triangular part, then symmetrizes via `H + H^dagger`.  Includes sublattice mass `delta`. |
+| `get_intralayerH_K(N, theta, B, labels, params, delta_site)` | Intralayer kinetic Hamiltonian for K valley.  Builds upper-triangular part, then symmetrizes via `H + H^dagger`.  Includes sublattice mass `delta` on `delta_site`, one of `'A'`, `'B'`, or `'AB'` (both sublattices — the ABC-trilayer middle layer). |
 | `get_intralayerH_Kp(N, theta, B, labels, params, delta_site)` | Same for K' valley. |
 
 ### `main_v3.py` (production driver)
 
 | Function | Purpose |
 |---|---|
+| `_layer_weights(evecs, dl, nlayers)` | Per-eigenstate probability on each layer: `sum |psi|^2` over each layer's contiguous `dl` block.  Returns `(dim, nlayers)`; rows sum to 1. |
+| `_stack_layers(Hintra_list, Hinter, U, nlayers, stacking_type)` | Assemble the layer block matrix for `nlayers >= 2`.  Block-tridiagonal: the same `Hinter` on every consecutive bond (ABC stacking), no next-nearest-layer coupling.  `stacking_type` picks whether `Hinter` or its dagger sits in the upper-right of each bond. |
 | `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths.  Operates on pre-scaled data (already multiplied by `1000/Q_E`) so no per-k-point unit conversion is needed.  Uses `eigvalsh(overwrite_a=True, check_finite=False)` to avoid internal copies. |
 | `_init_kpoint_worker(shared)` | Pool initializer: stores shared matrices in module-global `_worker_shared` so they are pickled once per worker, not per task. |
 | `_solve_kpoint(args)` | Pool worker entry point.  Unpacks `(kc, kpt)`, calls `_solve_kpoint_core`, returns `(kc, tek_K, tek_Kp)`. |
@@ -227,6 +279,10 @@ For a given `(pp, qq, N)` with `main_v3.py`:
 - Basis states per layer before chopping: `2 * qq * (N+1)` (two sublattices)
 - After chopping LL_N from one sublattice: `qq*(2N+1)`
 - Total Hamiltonian dimension: `nlayers * qq*(2N+1)`
+
+The chop is applied identically inside each per-layer builder, so every
+diagonal block has the same post-chop dimension `dim_MLG` and the layer
+block matrix is well formed for any `nlayers`.
 
 Both `main_v3.py` and `main_v2.py` use `Nq = qq`; they differ in
 T-matrix conventions, BZ vectors, and the real-space unit cell definition.
@@ -369,8 +425,11 @@ result = {
     'calctype': 'ek',
     'params':   dict,                       # all input file parameters
     'kpoints':  ndarray (Nk_tot, 2),        # k-points in 1/m
-    'bands_K':  ndarray (Nk_tot, 2*dim1),   # sorted eigenvalues in meV
-    'bands_Kp': ndarray (Nk_tot, 2*dim1),
+    'bands_K':  ndarray (Nk_tot, dim_total),  # sorted eigenvalues in meV
+    'bands_Kp': ndarray (Nk_tot, dim_total),
+    # with layer_resolved = 1:
+    'weights_K':  ndarray (Nk_tot, dim_total, nlayers),
+    'weights_Kp': ndarray (Nk_tot, dim_total, nlayers),
 }
 ```
 
@@ -385,6 +444,10 @@ result = {
     'elist':   ndarray (nebin,),    # energy grid in meV
     'dos_K':   ndarray (nebin,),    # states per primitive moire cell per bin, K valley
     'dos_Kp':  ndarray (nebin,),    # states per primitive moire cell per bin, K' valley
+    # with layer_resolved = 1, one array per layer:
+    #   dos_K_top / dos_K_bottom            (nlayers = 2)
+    #   dos_K_top / dos_K_mid / dos_K_bottom (nlayers = 3)
+    # and the same for dos_Kp_*.
 }
 ```
 
@@ -396,6 +459,24 @@ the LL degeneracy `B*A_uc/Phi_0 = qq/(2*pp)` per cell per Landau level.
 Divide by `A_uc` for states per unit area.
 
 The legacy MATLAB value `calctype = 'spectrum'` is mapped to `'dos'`.
+
+#### Layer resolution
+
+`layer_resolved = 1` switches the solver from `eigvalsh` to `eigh` and
+records `_layer_weights`: the norm of each eigenvector on each layer's
+contiguous `dim_MLG` block.  The blocks are disjoint and exhaustive, so
+the weights partition unity exactly and `sum_L dos_L == dos` to machine
+precision.
+
+**This output changed shape.**  `weights_K` was 2D and held the
+top-layer weight alone, with the bottom layer left to be inferred as
+`1 - weights_K`; that inference has no three-layer analogue.  It is now
+`(Nk, dim, nlayers)` for every `nlayers`, matching the zero-field
+engine.  Bilayer code reading `weights_K[k, n]` must become
+`weights_K[k, n, 0]`.  In DOS mode the per-layer arrays are accumulated
+from the weights directly rather than one being inferred from the other.
+
+Forced to 0 for `nlayers = 1`, where it is vacuous.
 
 ### File output
 
