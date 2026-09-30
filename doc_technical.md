@@ -1138,11 +1138,23 @@ The zero-field solver is self-contained in `zerofield.py`, reusing only
 | `_build_coupling_matrices_Kp(V0, V1)` | Same for K' valley (conjugate phases, permuted sublattice factors). |
 | `_build_moire_hopping(Q_idx, NG, T0, T1, T2, T3, valley)` | Assemble the k-independent moire hopping matrix `H_hopp` (2*NG x 2*NG) using integer-index Kronecker deltas on Q-vector differences.  Valley-dependent sign convention on the q-vectors. |
 | `_build_H_singlelayer(...)` / `_build_H_bilayer(...)` / `_build_H_trilayer(...)` | Assemble the full Hamiltonian at one k-point for `nlayers = 1/2/3` given a `dirac_term(j)` and `interlayer_term(j)` callback (valley sign conventions live in the caller). Shared by `_solve_kpath_K`/`_solve_kpath_Kp`. |
-| `_solve_kpath_K(...)` | Build and diagonalize the full Hamiltonian at each k-point for K valley.  Dispatches to the `_build_H_*` helper for `nlayers = 1`, `2`, or `3`. |
+| `_solve_kpath_K(...)` | Build and diagonalize the full Hamiltonian at each k-point for K valley.  Dispatches to the `_build_H_*` helper for `nlayers = 1`, `2`, or `3`.  Returns `(bands, weights)`; `weights` is `None` unless `layer_resolved`.  Takes an arbitrary array of k-points, so the same function serves both the k-path and the DOS mesh. |
 | `_solve_kpath_Kp(...)` | Same for K' valley (sign flip on sigma_x in the Dirac term and interlayer coupling). |
+| `_layer_weights(evecs, NG, nlayers)` | Per-eigenstate probability on each layer: `sum |psi|^2` over each layer's contiguous `2*NG` block.  Returns `(dim, nlayers)`; rows sum to 1. |
 | `_make_kpath(q1, q2, dk, valley)` | Build high-symmetry k-path through the moire BZ.  K valley: K1->Gamma->K2->K1.  K' valley: K2->K1->Gamma->K2.  Returns k-points, linearized parameter, tick positions, and tick labels. |
-| `do_calc(filepath)` | Main entry point: read input, compute geometry, build coupling matrices, solve along k-path for each valley. |
+| `_make_kmesh(q1, q2, nk1, nk2)` | Uniform `nk1 x nk2` mesh tiling exactly one moire BZ: `k = (i/nk1)*q1 + (j/nk2)*q2`.  Valley-independent, so it is built once and reused for both. |
+| `_accumulate_dos(bands, weights, elist, nlayers, nk_total)` | Histogram eigenvalues onto the nearest `elist` grid point with weight `1/Nk`.  `nk_total` overrides that normalization when `bands` is one chunk of the mesh, so per-chunk results sum to the full-mesh DOS.  Returns `(dos, dos_layers)` with `dos_layers` shape `(nebin, nlayers)`, or `None` when weights are absent. |
+| `_broaden(dos, elist, sigma)` | Convolve with a normalized Gaussian.  Integral-preserving, so the states/cell normalization survives -- except for weight convolved past the ends of `elist`, which `mode='same'` discards. |
+| `_solve_chunk(args)` | Module-level worker: runs the serial solver on one contiguous block of k-points.  Picklable, so it can be the `Pool.map` target. |
+| `_solve_parallel(valley, kpoints, kw, nworkers, dos_spec)` | Split the k-points into `4*nworkers` contiguous chunks and map them over a `spawn` pool.  Chunks are contiguous and `Pool.map` preserves order, so concatenating reproduces the serial `bands` **bit-identically**, not merely to tolerance.  With `dos_spec` each worker histograms its own chunk and only the DOS arrays come back; see "Parallel k-loop" for the one array that is not bit-identical. |
+| `do_calc(filepath)` | Main entry point: read input, compute geometry, build coupling matrices, then per valley either solve along the k-path (`calctype = 'ek'`) or over the BZ mesh and bin into a DOS (`calctype = 'dos'`). |
 | `main(input_file)` | CLI wrapper: calls `do_calc`, saves to `.npz` or `.mat`. |
+
+**Signature note**: `_solve_kpath_K`/`_Kp` gained a trailing
+`layer_resolved=0` argument and now return a `(bands, weights)` tuple
+rather than a bare array.  Several untracked June 2026 `test_*.py`
+scripts call them positionally with a signature that predates even the
+`nlayers` argument; those were already stale and were not updated.
 
 ---
 
@@ -1256,24 +1268,145 @@ k-points (intentional, matching MATLAB).
 
 ---
 
-## 20. Unit conventions (zero-field)
+## 20. Layer resolution and DOS (zero-field)
+
+### Layer weights
+
+The basis is ordered layer-major: layer `L` owns the contiguous slice
+`[L*2*NG, (L+1)*2*NG)` of the Hamiltonian, with `L = 0` the layer
+furthest from the hBN and `L = nlayers-1` the layer the moire potential
+`H_hopp` is attached to.  The layer weight of eigenstate `n` is therefore
+just the norm of its coefficients in that slice,
+
+```
+w_L(n) = sum_{i in layer L} |psi_n(i)|^2
+```
+
+which partitions unity because the eigenvectors are normalized and the
+slices are disjoint and exhaustive.  This is exact, not a projection
+approximation — there is no overlap matrix, the plane-wave basis is
+orthonormal, and layers do not share basis functions.
+
+`layer_resolved = 1` switches the solver from `eigvalsh` to `eigh`
+(~2-3x slower) since the eigenvectors are needed.  Eigenvalues from
+`eigh` are already ascending, so the `np.sort` of the eigenvalue-only
+path is dropped rather than applied — sorting there would break the
+eigenvalue/eigenvector correspondence.  The two paths give identical
+band energies (verified to ~1e-14 eV).
+
+`layer_resolved` is silently forced to 0 for `nlayers = 1`, where it is
+vacuous.
+
+### DOS mesh and normalization
+
+`calctype = 'dos'` replaces the k-path with `_make_kmesh`, a uniform
+`nk1 x nk2` grid on the parallelogram spanned by `q1, q2` — exactly one
+moire BZ, sampled with no double counting of the zone boundary (the grid
+runs `i/nk1` for `i = 0..nk1-1`, so the upper edge belongs to the
+neighbouring cell).  Gamma is on the grid.
+
+Each eigenvalue carries weight `1/(nk1*nk2)`: every band holds one state
+per primitive moire cell, so summing over the mesh gives states per
+primitive moire cell.  Unlike the Hofstadter engine there is no `2*pp`
+magnetic-cell factor — the zero-field cell *is* the primitive moire cell.
+
+Binning is nearest-grid-point, implemented as `searchsorted` against the
+`elist` midpoints followed by `bincount`.  This reproduces the `argmin`
+semantics of the Hofstadter DOS while running in `O(N log nebin)` rather
+than `O(N * nebin)`, which matters here because the mesh carries
+`nk1*nk2*dim` eigenvalues.  Eigenvalues outside `[elist[0], elist[-1]]`
+are dropped, so the integrated DOS equals `dim` only when the window
+spans the whole spectrum.
+
+The layer-resolved DOS uses the same bin indices with the layer weights
+as `bincount` weights, so `sum_L dos_L == dos` identically (verified to
+~1e-17).
+
+`dos_broadening` convolves every DOS array with a Gaussian truncated at
+4 sigma and renormalized to unit sum, applied *after* binning.  Because
+the kernel sums to 1 the integral is preserved up to the truncation at
+the ends of the grid, so the states/cell normalization is unaffected.
+
+### Parallel k-loop
+
+`isparallel = 1` splits the k-points into `4*nworkers` contiguous chunks
+and maps them over a pool, running the unchanged serial solver on each.
+Oversubscribing chunks to workers is deliberate: this is a hybrid-core
+machine (P-cores and E-cores), so equal-sized chunks would leave the
+fast cores idle waiting on stragglers, whereas `Pool.map` hands out the
+smaller chunks as workers free up.
+
+Chunks are contiguous, `Pool.map` preserves order, and floating-point
+work per k-point is unchanged, so the concatenated `bands` and the
+unweighted `dos` are **bit-identical** to serial — verified with
+`max|par - ser| == 0`.  The unweighted DOS survives the chunked sum
+because `np.bincount` counts states as integers and the `1/Nk` weight is
+applied once at the end.
+
+The one exception is the **layer-resolved** DOS.  There the accumulation
+is `np.bincount(..., weights=...)`, a floating-point sum, and summing
+per-chunk partial histograms reassociates it: `dos_K_top` and friends
+differ from serial by ~1e-17 absolute (~1e-16 relative), which is
+reassociation, not a different calculation.  Nothing downstream is
+sensitive at that level, but a test asserting `== 0` on the layer
+channels will fail.
+
+The pool uses `get_context('spawn')` explicitly rather than the platform
+default.  Under spawn, children read the environment at interpreter
+startup, so setting `OPENBLAS_NUM_THREADS=1` (etc.) in the parent just
+before pool creation reaches the child BLAS before it loads, while
+leaving the parent's already-initialized BLAS alone.  Forcing spawn
+therefore keeps thread-pinning correct on Linux too, where the default
+`fork` would inherit an already-loaded multithreaded BLAS and
+oversubscribe `nworkers` processes x `ncore` threads.  This is why the
+env vars are *not* pinned at module import as they are in `main_v3.py`:
+doing that would also slow down serial zero-field runs, which have no
+pool to oversubscribe.
+
+Unlike `main_v3.py`, `isparallel` defaults to **0**.  Spawn re-imports
+the caller's `__main__`, so an unguarded caller breaks, and several
+existing zero-field `test_*.py` scripts call `do_calc` at module level.
+Startup cost also makes it a pessimization on short runs: at a 6x6 DOS
+mesh it is 0.4x, at 24x24 it is 4.1x.  A separate pool is created per
+valley, so the spawn cost is paid twice — that, not the k-loop, is what
+caps the speedup well below `nworkers`.  Reusing one pool across both
+valleys is the obvious improvement and is not implemented.
+
+### Truncation caveat
+
+The plane-wave cutoff `NQ` means the highest of the `dim` bands are not
+converged, and their spurious energies land in the histogram like any
+other.  The DOS is physical only in an energy window well inside the
+cutoff; convergence must be checked by raising `NQ`.  This is a sharper
+constraint than for `calctype = 'ek'`, where an unconverged high band is
+visibly separate and simply ignored, whereas in a DOS it silently adds
+weight.
+
+---
+
+## 21. Unit conventions (zero-field)
 
 | Stage | Units |
 |---|---|
-| Input parameters (g0, g1, v0, v1, U) | meV |
+| Input parameters (g0, g1, v0, v1, U, elist, dos_broadening) | meV |
 | Internal Hamiltonian | eV (and Angstroms for momentum) |
 | Output eigenvalues | eV |
+| Output `elist` | eV |
 
 The conversion: `hbar_vF (eV*A) = sqrt(3)/2 * g0(meV)/1000 * a(A)`.
 Plot in meV by multiplying eigenvalues by 1000.
 
+Note the asymmetry on `elist`: it is *read* in meV, for consistency with
+every other input parameter, and *returned* in eV, for consistency with
+`band_K`.  Every energy in a zero-field output file is in eV.
+
 ---
 
-## 21. Files (zero-field)
+## 22. Files (zero-field)
 
 | File | Role |
 |---|---|
-| `zerofield.py` | Zero-field engine: geometry, Hamiltonian, k-path solver |
+| `zerofield.py` | Zero-field engine: geometry, Hamiltonian, k-path and BZ-mesh solvers, layer-resolved DOS |
 | `input_zerofield.txt` | Default input file |
 | `validate_zerofield.py` | Benchmark comparison against MATLAB `bands_BG.mat` |
 | `plot_zerofield.m` | MATLAB plotting script |

@@ -19,13 +19,25 @@ trilayer graphene on hBN.  Four calculation modes:
    localization-induced σ_xx suppression in narrow subbands.
    Legacy driver `main_v2.py` is kept for reference.
 2. **Zero-field** (`zerofield.py`): Moire band structure via plane-wave
-   expansion along a k-path through the moire BZ.  Supports `nlayers = 3`
+   expansion.  Supports `calctype = 'ek'` (bands along a k-path through
+   the moire BZ, the default) and `calctype = 'dos'` (density of states
+   on an `nk1 x nk2` mesh tiling one moire BZ).  There is no zero-field
+   `'transport'` mode.  `layer_resolved = 1` adds per-eigenstate layer
+   weights in either mode — `weights_K` shape `(NT, dim, nlayers)` for
+   `'ek'`, and `dos_K_top`/`_mid`/`_bottom` for `'dos'`.  Note this is
+   *not* the same shape as the Hofstadter engine's bilayer-only
+   `weights_K`, which is 2D and holds the top-layer weight alone.
+   Supports `nlayers = 3`
    with ABC (rhombohedral) stacking: layers 1-2 and 2-3 each couple through
    the same gamma1/v3 interlayer operator (identical bond geometry at every
    step of the chain, the defining feature of chiral/ABC stacking); there
    is no direct layer1-layer3 coupling.  `U` takes a 3-element
-   `[U_top, U_mid, U_bot]` array.  Only implemented for the zero-field
-   engine, not Hofstadter or semiclassical.
+   `[U_top, U_mid, U_bot]` array — this is also how a displacement field
+   is applied (`U = [D/2, 0, -D/2]`); there is no separate D parameter.
+   Layer 1 is the layer furthest from the hBN; the moire potential acts
+   on layer 3 only, so the sign of D is physically meaningful.  Trilayer
+   is only implemented for the zero-field engine, not Hofstadter or
+   semiclassical.
 3. **Semiclassical** (`semiclassical/`): Full BZ k-mesh band structure
    plus Berry curvature, orbital moment, Fukuyama susceptibility, and
    Onsager semiclassical quantization (Landau level fan diagrams).
@@ -45,7 +57,7 @@ trilayer graphene on hBN.  Four calculation modes:
 | `basis.py` | Label-based basis toolkit: `outer_product`, `getindices` |
 | `parser.py` | MATLAB-style input file parser (shared) |
 | `constants.py` | Physical constants (shared) |
-| `zerofield.py` | Zero-field engine: moire geometry, plane-wave Hamiltonian, k-path solver |
+| `zerofield.py` | Zero-field engine: moire geometry, plane-wave Hamiltonian, k-path and BZ-mesh solvers, layer-resolved DOS |
 | `validate.py` | Hofstadter benchmark against MATLAB `.mat` data (uses legacy conventions) |
 | `validate_transport_norm.py` | main_v3 normalization + minimal-zone validation (zone equivalence, same-B invariance, state counting) |
 | `validate_transport_kubo.py` | (untracked) Kubo evaluation-knob convergence (`sigma_xx_buffer`, `eps_per_width`, `eps_grid_floor`): reruns a case tightened and reports the difference |
@@ -112,7 +124,19 @@ than re-parsing the source.
   `validate_transport_norm.py` — run it after touching the k-mesh,
   DOS binning, or transport prefactors.
 - **Zero-field units**: Input parameters are in meV; converted to eV
-  internally. Eigenvalues are output in eV.
+  internally. Eigenvalues are output in eV.  This includes `elist`, which
+  is read in meV (like every other input) but returned in eV (like
+  `band_K`) — every energy in a zero-field output file is eV.
+- **Zero-field DOS normalization**: the mesh tiles exactly one moire BZ
+  (`k = (i/nk1)*q1 + (j/nk2)*q2`, upper edge excluded) and each
+  eigenvalue gets weight `1/(nk1*nk2)` — states per **primitive moire
+  cell** per bin.  No `2*pp` factor, unlike Hofstadter: at zero field the
+  cell is the primitive moire cell.  Layer weights are exact slice norms
+  of the eigenvector (layer-major basis ordering, disjoint `2*NG`
+  blocks), so `sum_L dos_L == dos` to machine precision.  The plane-wave
+  truncation `NQ` makes the top bands unconverged, and in a DOS they add
+  weight silently rather than being visibly ignorable as in `'ek'` —
+  check convergence in NQ before trusting a DOS window.
 - **Semiclassical units**: Input in meV; internal calculation in eV;
   output E in meV, Oz/Lz/vol_M in SI (m²), dChi_dE in SI.
   Post-processing conversions: Oz×1e-20, Lz×1e-20×1e3, vol_M×1e-20,
@@ -221,6 +245,20 @@ pin `OPENBLAS_NUM_THREADS=1` before importing NumPy.  This prevents BLAS
 thread oversubscription when using the multiprocessing pool (`isparallel=1`).
 Do not remove this setting.
 
+`zerofield.py` deliberately does **not** pin threads at import.  It also
+supports `isparallel`, but pins the thread-count env vars in the parent
+immediately before creating the pool and forces `get_context('spawn')`,
+so children pick the setting up at interpreter startup while serial runs
+keep multithreaded BLAS.  Its `isparallel` defaults to **0**, not 1:
+spawn re-imports the caller's `__main__` and several zero-field
+`test_*.py` scripts call `do_calc` at module level, and pool startup
+makes it a net loss on short runs (0.4x at a 6x6 DOS mesh, 4.1x at
+24x24).  Bands and the unweighted DOS are bit-identical to serial; the
+layer-resolved DOS differs by ~1e-17 because the chunked weighted
+`bincount` reassociates a float sum.  A separate
+pool per valley pays the spawn cost twice and is what caps the speedup;
+reusing one pool is unimplemented.
+
 ## Validation workflow
 
 MATLAB is on the PATH. After any change to Hamiltonian construction or
@@ -259,6 +297,19 @@ the transport k-loop.
    `matlab_code/zerofield/bands_BG.mat`.
 2. Max absolute error should be < 5e-6 eV (residual is from truncated
    Dq in the MATLAB benchmark; the Python code is more accurate).
+
+**`input_zerofield.txt` is currently set to `nlayers = 1`** (left over
+from the June 2026 hBN-swap tests) while the benchmark is bilayer, so
+`validate_zerofield.py` fails on a shape mismatch out of the box.  Point
+it at a bilayer input (`nlayers = 2`, `g0 = 2472`, `hbar_vF = 5.2657`,
+`g1 = 340`, `theta = 1.0`, `NQ = 7`, `dk = 5e-4`) to actually run the
+check; that configuration passes at 2.4e-6 eV.
+
+For the DOS / layer-resolved additions, run
+`calculations/trilayer/check_zerofield_dos.py` (untracked): `'ek'` bands
+bit-identical to `git show HEAD:zerofield.py`, layer weights a partition
+of unity, `sum_L dos_L == dos`, broadening integral-preserving, plus the
+MATLAB bilayer benchmark.  All must PASS.
 
 ## Testing parameters
 

@@ -9,7 +9,8 @@ Two calculation modes:
 - **Hofstadter** (`main_v3.py`): Magnetic Bloch bands at rational flux
   qq/pp, using a Landau-level basis.
 - **Zero-field** (`zerofield.py`): Moire band structure along a k-path
-  through the moire BZ, using a plane-wave expansion.
+  through the moire BZ, or density of states on a moire-BZ mesh, using a
+  plane-wave expansion.  Both support layer-resolved projection.
 
 ---
 
@@ -138,13 +139,56 @@ the difference in each transport coefficient.
 |---|---|---|---|
 | `nlayers` | int | `2` | 1 = monolayer, 2 = bilayer, 3 = ABC-stacked trilayer |
 | `theta` | float (deg) | `0.0` | Twist angle between graphene and hBN |
-| `U` | array (meV) | `[0 0]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer, `[top, mid, bottom]` for trilayer. A shorter array is padded by repeating its last element. |
+| `U` | array (meV) | `[0 0]` | Layer on-site energies: scalar for monolayer, `[top, bottom]` for bilayer, `[top, mid, bottom]` for trilayer. A shorter array is padded by repeating its last element. This is how a displacement field is applied — see "Displacement field" below. |
 | `NQ` | int | `7` | Q-vector grid size per direction (total: NQ^2 plane waves) |
-| `dk` | float (1/A) | `5e-4` | k-point spacing along the path |
+| `dk` | float (1/A) | `5e-4` | k-point spacing along the path (`calctype = 'ek'` only) |
 | `valley` | cell | `{'K', 'Kp'}` | Which valleys to compute |
 | `stacking_type` | int | `2` | Interlayer stacking: 1 = B1-A2 (Type 1), 2 = A1-B2 (Type 2). Ignored for monolayer. For trilayer (`nlayers = 3`, ABC stacking) the same choice is applied identically to both interlayer bonds (1-2 and 2-3). |
 | `moire_psi` | float (rad) | `0.29` | Moire coupling phase psi. |
+| `calctype` | string | `'ek'` | `'ek'` = band structure along the k-path, `'dos'` = density of states on a moire-BZ mesh. `'transport'` is **not** available in the zero-field engine. |
+| `layer_resolved` | int | `0` | 1 = also compute per-eigenstate layer weights (uses `eigh` instead of `eigvalsh`; roughly 2-3x slower). Ignored for `nlayers = 1`. Works in both `'ek'` and `'dos'` mode. |
+| `nk1` | int | `30` | k-mesh points along q1 (`calctype = 'dos'` only) |
+| `nk2` | int | value of `nk1` | k-mesh points along q2 (`calctype = 'dos'` only) |
+| `nebin` | int | `1000` | Number of energy bins (`calctype = 'dos'` only) |
+| `elist` | array (meV) | `linspace(-300,300,nebin)` | Energy grid **in meV** (`calctype = 'dos'` only). Note it is returned in eV — see the units warning below. |
+| `dos_broadening` | float (meV) | `0.0` | Gaussian smoothing width applied to every DOS array. 0 = raw histogram. The convolution is normalized, so the integral (and hence the states/cell normalization) is unchanged — but weight smeared past the ends of `elist` is dropped, so leave ~4 sigma of margin between `elist` and the occupied spectrum if you intend to integrate the result. |
+| `isparallel` | int | `0` | 1 = split the k-loop across processes. Bands and the unweighted DOS are bit-identical to serial; the layer-resolved DOS differs by ~1e-17 (float reassociation). **Defaults to 0**, unlike the Hofstadter engine — see the caveat below. |
+| `nworkers` | int | `cpu_count()` | Worker processes when `isparallel = 1`. Capped at the number of k-points. |
 | `outputfile` | string | `bands_zerofield.npz` | Output filename |
+
+#### Parallelism caveat
+
+`isparallel` defaults to **0** here, whereas `main_v3.py` defaults it to 1.
+Two reasons:
+
+- The pool uses the `spawn` start method, so any script that calls
+  `do_calc` must guard its entry point with
+  `if __name__ == '__main__':`.  Several existing zero-field `test_*.py`
+  scripts call `do_calc` at module level and would break.
+- It only pays off on large k-loops.  Pool startup is ~1-2 s per valley,
+  so a short run gets *slower*: at a 6x6 DOS mesh (36 k-points) parallel
+  runs 0.4x, while at 24x24 (576 k-points) it runs 4.1x.  Turn it on for
+  DOS meshes and fine k-paths; leave it off for quick band structures.
+
+Speedup is well short of the worker count because a separate pool is
+created per valley and the spawn cost is paid twice.
+
+#### Displacement field
+
+There is no separate displacement-field parameter; a perpendicular field
+enters as the layer on-site energies `U`.  The usual convention for ABC
+trilayer is a linear potential ramp across the stack,
+
+```
+U = [D/2, 0, -D/2];      % D = total potential drop, meV
+```
+
+with layer 1 (`U[0]`) the layer **furthest from the hBN** and layer 3
+(`U[2]`) the layer adjacent to it.  The moire potential acts on layer 3
+only, so the two ends of the stack are not equivalent and the sign of `D`
+matters: it selects whether the moire-coupled layer is pushed up or down
+in energy relative to the far layer.  Nothing in the code assumes a ramp
+— any three values are allowed, e.g. to model interlayer screening.
 
 ---
 
@@ -324,6 +368,17 @@ low flux where subbands are narrower than Γ₀.  Set
 
 ### Zero-field output
 
+Both modes also return `dim` (Hamiltonian dimension), `calctype`, and
+`layer_resolved`.
+
+> **Units:** every zero-field *output* energy is in **eV**, including the
+> `elist` grid in DOS mode, even though every *input* energy (`g0`, `v0`,
+> `U`, `elist`, `dos_broadening`, ...) is in meV.  Multiply outputs by
+> 1000 for meV.  This differs from the Hofstadter engine, which is meV
+> throughout.
+
+#### `calctype = 'ek'` (default)
+
 | Key | Shape | Units | Description |
 |---|---|---|---|
 | `band_K` | (NT, dim) | eV | Sorted eigenvalues along k-path, K valley |
@@ -334,11 +389,62 @@ low flux where subbands are narrower than Γ₀.  Set
 | `tick_labels_K` | (4,) | -- | Labels: K1, G, K2, K1 |
 | `tick_positions_Kp` | (4,) | -- | High-symmetry point positions on k_region |
 | `tick_labels_Kp` | (4,) | -- | Labels: K2, K1, G, K2 |
-| `dim` | int | -- | Hamiltonian dimension |
 
 where `NT` is the total number of k-points and
 `dim = nlayers * 2*NQ^2` (`2*NQ^2` monolayer, `4*NQ^2` bilayer, `6*NQ^2`
-trilayer).  Multiply eigenvalues by 1000 for meV.
+trilayer).
+
+With `layer_resolved = 1`:
+
+| Key | Shape | Units | Description |
+|---|---|---|---|
+| `weights_K` | (NT, dim, nlayers) | -- | Per-eigenstate layer weights, K valley |
+| `weights_Kp` | (NT, dim, nlayers) | -- | Per-eigenstate layer weights, K' valley |
+
+`weights[:, :, L]` is the probability on layer `L`, with `L = 0` the
+layer furthest from the hBN and `L = nlayers-1` the layer adjacent to
+it.  The layer axis sums to 1 for every eigenstate.  Use it to colour a
+band structure by layer character.
+
+Note this differs from the Hofstadter engine, where `weights_K` is 2D and
+holds the top-layer weight alone.
+
+#### `calctype = 'dos'`
+
+| Key | Shape | Units | Description |
+|---|---|---|---|
+| `elist` | (nebin,) | **eV** | Energy grid (input in meV, returned in eV) |
+| `dos_K` | (nebin,) | states/cell | States per primitive moire cell per bin, K valley |
+| `dos_Kp` | (nebin,) | states/cell | Same, K' valley |
+
+With `layer_resolved = 1`, one array per layer, named for its position in
+the stack (`top` = furthest from hBN):
+
+| Key | nlayers | Description |
+|---|---|---|
+| `dos_K_top`, `dos_K_bottom` | 2 | Layer-projected DOS, K valley |
+| `dos_K_top`, `dos_K_mid`, `dos_K_bottom` | 3 | Layer-projected DOS, K valley |
+| `dos_Kp_top`, ... | 2 or 3 | Same, K' valley |
+
+The layer arrays sum to the total (`dos_K_top + dos_K_mid +
+dos_K_bottom = dos_K`, exact to machine precision).
+
+**DOS normalization**: the k-mesh tiles exactly one moire BZ
+(`k = (i/nk1)*q1 + (j/nk2)*q2`), and each eigenvalue contributes
+`1/(nk1*nk2)` to the bin nearest its energy — one state per primitive
+moire cell per k-point.  The output is therefore states per primitive
+moire cell per bin.  Divide by the primitive cell area
+`A_uc = sqrt(3)/2 * L_moire^2` for states per unit area.  Per spin and
+per valley: multiply by 2 for spin, and sum `dos_K + dos_Kp` for the
+total.
+
+**Convergence caveat**: the plane-wave basis is truncated at `NQ`, so the
+highest bands are not converged and the DOS is only trustworthy in an
+energy window well inside the cutoff.  Eigenvalues outside the `elist`
+range are silently dropped, so the integrated DOS is less than `dim`
+whenever the window does not span the full spectrum — that is expected,
+not a normalization error.  Check convergence by raising `NQ` and
+confirming the DOS in your window of interest does not move.
 
 ---
 
@@ -377,11 +483,23 @@ from zerofield import do_calc
 
 result = do_calc('input_zerofield.txt')
 
-band_K = result['band_K']           # shape (NT, dim), eV
-band_Kp = result['band_Kp']
-k_region = result['k_region_K']     # [0, 1] parameter
-ticks = result['tick_positions_K']  # high-symmetry points
-labels = result['tick_labels_K']    # ['K1', 'G', 'K2', 'K1']
+if result['calctype'] == 'ek':
+    band_K = result['band_K']           # shape (NT, dim), eV
+    band_Kp = result['band_Kp']
+    k_region = result['k_region_K']     # [0, 1] parameter
+    ticks = result['tick_positions_K']  # high-symmetry points
+    labels = result['tick_labels_K']    # ['K1', 'G', 'K2', 'K1']
+    if result['layer_resolved']:
+        wt = result['weights_K']        # (NT, dim, nlayers)
+        top = wt[:, :, 0]               # layer furthest from hBN
+
+elif result['calctype'] == 'dos':
+    elist = result['elist']             # energy grid, eV
+    dos_K = result['dos_K']             # states per moire cell per bin
+    if result['layer_resolved']:
+        dos_top = result['dos_K_top']   # layer furthest from hBN
+        dos_mid = result['dos_K_mid']   # trilayer only
+        dos_bot = result['dos_K_bottom']
 ```
 
 ---
@@ -638,6 +756,55 @@ dk = 5e-4;
 valley = {'K', 'Kp'};
 outputfile = 'bands_zerofield_trilayer.mat';
 ```
+
+### Zero-field ABC trilayer, layer-resolved bands at finite displacement field
+
+`U = [D/2, 0, -D/2]` with `D = 60` meV.  `weights_K[:, :, 0]` is the
+weight on the layer furthest from the hBN.
+
+```
+theta = 1.0;
+nlayers = 3;
+g0 = 2472;
+hbar_vF = 5.2657;
+g1 = 340;
+g3 = 0;
+v0 = 29.8;
+v1 = 21;
+U = [30 0 -30];
+NQ = 7;
+dk = 5e-4;
+valley = {'K', 'Kp'};
+calctype = 'ek';
+layer_resolved = 1;
+outputfile = 'bands_trilayer_D60.mat';
+```
+
+### Zero-field ABC trilayer, layer-resolved DOS
+
+```
+theta = 1.0;
+nlayers = 3;
+g0 = 2472;
+hbar_vF = 5.2657;
+g1 = 340;
+g3 = 0;
+v0 = 29.8;
+v1 = 21;
+U = [30 0 -30];
+NQ = 7;
+calctype = 'dos';
+layer_resolved = 1;
+nk1 = 30;
+nk2 = 30;
+nebin = 600;
+elist = linspace(-150, 150, nebin);
+dos_broadening = 1.0;
+valley = {'K', 'Kp'};
+outputfile = 'dos_trilayer_D60.mat';
+```
+
+To turn the moire potential off for comparison, set `v0 = 0; v1 = 0;`.
 
 ---
 
