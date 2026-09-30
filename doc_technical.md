@@ -212,7 +212,7 @@ Code is split across six modules:
 | `_solve_kpoint_core(shared_dict, kpt)` | Given a k-point (2-vector), compute phase factors, build k-dependent moire potential, form total Hamiltonian, and diagonalize.  Returns `(eigenvalues_K, eigenvalues_Kp)`.  Used by both serial and parallel paths.  Operates on pre-scaled data (already multiplied by `1000/Q_E`) so no per-k-point unit conversion is needed.  Uses `eigvalsh(overwrite_a=True, check_finite=False)` to avoid internal copies. |
 | `_init_kpoint_worker(shared)` | Pool initializer: stores shared matrices in module-global `_worker_shared` so they are pickled once per worker, not per task. |
 | `_solve_kpoint(args)` | Pool worker entry point.  Unpacks `(kc, kpt)`, calls `_solve_kpoint_core`, returns `(kc, tek_K, tek_Kp)`. |
-| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer or bilayer depending on `nlayers`) using `Nq = qq`, pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel) over the minimal zone, post-processes into `ek`, `dos`, or `transport` output. |
+| `do_calc(filepath)` | Main entry point.  Reads input, computes derived quantities, builds k-independent Hamiltonians (monolayer, bilayer or ABC trilayer depending on `nlayers`, via `_stack_layers`) using `Nq = qq`, pre-scales them to meV (`1000/Q_E`), runs k-loop (serial or parallel) over the minimal zone, post-processes into `ek`, `dos`, or `transport` output. |
 | `main(input_file)` | CLI wrapper: calls `do_calc`, saves result to `.npz` or `.mat`. |
 
 Differences from `main_v2.py` (legacy):
@@ -1315,7 +1315,8 @@ K valley:   h_j = -hbar_vF * [(kx - Qx)*sigma_x + (ky - Qy)*sigma_y]
 K' valley:  h_j = -hbar_vF * [-(kx - Qx)*sigma_x + (ky - Qy)*sigma_y]
 ```
 
-**Interlayer (bilayer only)**: block-diagonal, one 2x2 block per Q-vector:
+**Interlayer** (`nlayers >= 2`; for `nlayers = 3` the same operator is
+reused on both bonds): block-diagonal, one 2x2 block per Q-vector:
 
 ```
 K valley:   U_j = gamma1 * [0,1;0,0] - hbar_v3 * [(kx-Qx) - i(ky-Qy)] * [0,0;1,0]
